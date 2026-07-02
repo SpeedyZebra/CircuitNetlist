@@ -1,0 +1,18 @@
+CIRCUIT Fault_Divider_Missing_Bottom
+
+COMPONENT V1 POWER_DC_SOURCE voltage=5V
+COMPONENT U1 MCU_ATtiny402_SOIC8
+COMPONENT R_TOP BASIC_RESISTOR value=100kohm role=divider_top
+
+NET VIN:
+    V1.POS
+    U1.VDD
+    R_TOP.1
+
+NET ADC_SENSE:
+    R_TOP.2
+    U1.PA6
+
+NET GND:
+    V1.NEG
+    U1.GND

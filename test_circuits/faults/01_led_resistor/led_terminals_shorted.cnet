@@ -1,0 +1,17 @@
+CIRCUIT Fault_LED_Terminals_Shorted
+
+COMPONENT V1 POWER_DC_SOURCE voltage=5V
+COMPONENT R1 BASIC_RESISTOR value=330ohm role=current_limit
+COMPONENT LED1 LIGHT_LED_RED vf=2.0V current=10mA
+
+NET VCC:
+    V1.POS
+    R1.1
+
+NET LED_SHORT:
+    R1.2
+    LED1.A
+    LED1.K
+
+NET GND [allow_single]:
+    V1.NEG

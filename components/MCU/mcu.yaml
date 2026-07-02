@@ -1,0 +1,30 @@
+- id: MCU_ATtiny402_SOIC8
+  name: ATtiny402
+  category: MCU
+  manufacturer: Microchip
+  part_number: ATtiny402
+  package: SOIC-8
+  description: 8-bit tinyAVR microcontroller
+  body: {renderer: dip_ic, width: 160, height: 200, fill: "#f4f4f4", stroke: "#222222", notch: top, pin_pitch: 40}
+  pins:
+    - {number: "1", name: VDD, aliases: [VCC], side: left, position: 1, electrical_type: power_in}
+    - {number: "2", name: PA6, aliases: [AIN6], side: left, position: 2, electrical_type: bidirectional}
+    - {number: "3", name: PA7, aliases: [AIN7], side: left, position: 3, electrical_type: bidirectional}
+    - {number: "4", name: GND, aliases: [VSS], side: left, position: 4, electrical_type: power_in}
+    - {number: "5", name: PA1, aliases: [AIN1], side: right, position: 4, electrical_type: bidirectional}
+    - {number: "6", name: PA2, aliases: [AIN2], side: right, position: 3, electrical_type: bidirectional}
+    - {number: "7", name: PA3, aliases: [AIN3], side: right, position: 2, electrical_type: bidirectional}
+    - {number: "8", name: PA0_UPDI, aliases: [PA0, UPDI], side: right, position: 1, electrical_type: bidirectional}
+  metadata: {datasheet_url: "", notes: ""}
+- id: MCU_ATtiny404_SOIC14
+  name: ATtiny404
+  category: MCU
+  manufacturer: Microchip
+  part_number: ATtiny404
+  package: SOIC-14
+  description: Placeholder symbol; exact pinout intentionally incomplete.
+  body: {renderer: dip_ic, width: 180, height: 320, fill: "#f4f4f4", stroke: "#222222", notch: top, pin_pitch: 40}
+  pins:
+    - {number: "1", name: PIN1_PLACEHOLDER, aliases: [], side: left, position: 1, electrical_type: bidirectional, required: false}
+    - {number: "14", name: PIN14_PLACEHOLDER, aliases: [], side: right, position: 1, electrical_type: bidirectional, required: false}
+  metadata: {incomplete_pinout: true, notes: "Do not use for production schematics until real pinout is added."}

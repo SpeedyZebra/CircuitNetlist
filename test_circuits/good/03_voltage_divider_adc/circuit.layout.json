@@ -1,0 +1,35 @@
+{
+  "components": {
+    "V1": {
+      "x": 120,
+      "y": 120,
+      "rotation": 0,
+      "locked": false
+    },
+    "U1": {
+      "x": 520,
+      "y": 120,
+      "rotation": 0,
+      "locked": false
+    },
+    "R_BOTTOM": {
+      "x": 960,
+      "y": 120,
+      "rotation": 0,
+      "locked": false
+    },
+    "R_TOP": {
+      "x": 960,
+      "y": 360,
+      "rotation": 0,
+      "locked": false
+    }
+  },
+  "nets": {},
+  "wire_waypoints": {},
+  "canvas": {
+    "grid": 40,
+    "width": 1600,
+    "height": 1000
+  }
+}

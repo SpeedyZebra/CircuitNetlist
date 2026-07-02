@@ -1,0 +1,19 @@
+{
+  "components": {
+    "V1": {"x": 120, "y": 210, "rotation": 0, "locked": false},
+    "U1": {"x": 500, "y": 180, "rotation": 0, "locked": false},
+    "R1": {"x": 340, "y": 230, "rotation": 90, "locked": false},
+    "R2": {"x": 780, "y": 170, "rotation": 90, "locked": false},
+    "C1": {"x": 340, "y": 430, "rotation": 90, "locked": false},
+    "C2": {"x": 760, "y": 460, "rotation": 90, "locked": false},
+    "TP_OUT": {"x": 920, "y": 253, "rotation": 0, "locked": false}
+  },
+  "nets": {
+    "VCC": {"render_style": "power_symbol"},
+    "GND": {"render_style": "power_symbol"},
+    "OUT": {"render_style": "net_label"},
+    "CONTROL": {"render_style": "net_label"}
+  },
+  "wire_waypoints": {},
+  "canvas": {"grid": 20, "width": 1200, "height": 780}
+}

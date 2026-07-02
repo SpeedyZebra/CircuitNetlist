@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Circuit Netlist</title>
+    <link rel="stylesheet" href="/static/styles.css">
+  </head>
+  <body>
+    <header class="toolbar">
+      <button id="load-circuit">Load Circuit</button>
+      <button id="reload">Reload</button>
+      <button id="reroute">Reroute</button>
+      <button id="save-layout">Save Layout</button>
+      <button id="export-svg">Export SVG</button>
+      <button id="export-png">Export PNG</button>
+      <button id="fit">Fit</button>
+      <button id="reset">Reset</button>
+      <label><input id="grid-toggle" type="checkbox" checked> Grid</label>
+      <label><input id="snap-toggle" type="checkbox" checked> Snap</label>
+      <span id="current-circuit">Current circuit: Solar LED</span>
+      <input id="search" placeholder="Search refs, nets, pins">
+    </header>
+    <main class="shell">
+      <aside class="library"><h2>Library</h2><div id="library"></div></aside>
+      <section class="canvas-wrap"><div id="canvas"></div></section>
+      <aside class="properties">
+        <h2>Properties</h2>
+        <div id="properties">Nothing selected</div>
+        <h2>ERC</h2>
+        <div id="diagnostics"></div>
+        <h2>Expected</h2>
+        <div id="expected-results"></div>
+      </aside>
+    </main>
+    <div id="drop-overlay">Drop .cnet file to load</div>
+    <dialog id="load-modal" class="load-modal">
+      <form method="dialog" class="modal-head">
+        <strong>Load Circuit</strong>
+        <button id="load-close" value="cancel">Close</button>
+      </form>
+      <div class="tabs">
+        <button class="tab active" data-tab="examples" type="button">Examples</button>
+        <button class="tab" data-tab="regression" type="button">Regression Cases</button>
+        <button class="tab" data-tab="local" type="button">Open Local File</button>
+      </div>
+      <input id="circuit-filter" placeholder="Filter circuits, refs, expected codes">
+      <section id="tab-examples" class="tab-panel active">
+        <div id="examples-list" class="case-list"></div>
+      </section>
+      <section id="tab-regression" class="tab-panel">
+        <h3>Good Circuits</h3>
+        <div id="regression-good-list" class="case-list"></div>
+        <h3>Fault Circuits</h3>
+        <div id="regression-fault-list" class="case-list"></div>
+      </section>
+      <section id="tab-local" class="tab-panel">
+        <label class="file-row">Netlist <input id="local-cnet" type="file" accept=".cnet,text/plain"></label>
+        <label class="file-row">Optional layout <input id="local-layout" type="file" accept=".json,application/json"></label>
+        <button id="load-local" type="button">Load File</button>
+        <pre id="file-preview" class="file-preview">No file selected</pre>
+      </section>
+      <div id="load-errors" class="load-errors"></div>
+    </dialog>
+    <footer class="status" id="status">Ready</footer>
+    <script src="/static/app.js"></script>
+  </body>
+</html>

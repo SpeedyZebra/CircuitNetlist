@@ -1,0 +1,86 @@
+- id: BASIC_RESISTOR
+  name: Resistor
+  category: Basic
+  body: {renderer: resistor, width: 140, height: 80, pin_pitch: 40}
+  parameters: {value: {required: true, unit: ohm}, part: {required: false}, role: {required: false}}
+  pins: &twopin
+    - {number: "1", name: "1", aliases: [A], side: left, position: 1, electrical_type: passive}
+    - {number: "2", name: "2", aliases: [B], side: right, position: 1, electrical_type: passive}
+- id: BASIC_CAPACITOR_CERAMIC
+  name: Ceramic Capacitor
+  category: Basic
+  body: {renderer: capacitor, width: 140, height: 80, pin_pitch: 40}
+  parameters: {value: {required: true, unit: F}, role: {required: false}}
+  pins: *twopin
+- id: BASIC_CAPACITOR_POLARIZED
+  name: Polarized Capacitor
+  category: Basic
+  body: {renderer: polarized_capacitor, width: 140, height: 80, pin_pitch: 40}
+  parameters: {value: {required: true, unit: F}, role: {required: false}}
+  pins:
+    - {number: "1", name: POS, aliases: ["+"], side: left, position: 1, electrical_type: passive}
+    - {number: "2", name: NEG, aliases: ["-"], side: right, position: 1, electrical_type: passive}
+- id: BASIC_INDUCTOR
+  name: Inductor
+  category: Basic
+  body: {renderer: inductor, width: 140, height: 80, pin_pitch: 40}
+  parameters: {value: {required: true, unit: H}, role: {required: false}}
+  pins: *twopin
+- id: BASIC_OP_AMP
+  name: Operational Amplifier
+  category: Basic
+  body: {renderer: op_amp, width: 160, height: 120, pin_pitch: 20}
+  parameters: {part: {required: false}, role: {required: false}}
+  pins:
+    - {number: "1", name: IN-, aliases: [INV, "-", NEG], side: left, position: 2, electrical_type: input}
+    - {number: "2", name: IN+, aliases: [NONINV, "+", POS], side: left, position: 4, electrical_type: input}
+    - {number: "3", name: OUT, aliases: [OUTPUT], side: right, position: 3, electrical_type: output}
+    - {number: "4", name: V+, aliases: [VCC, VDD, VP], side: top, position: 4, electrical_type: power_in}
+    - {number: "5", name: V-, aliases: [VEE, VSS, VN], side: bottom, position: 4, electrical_type: power_in}
+- id: BASIC_555_TIMER
+  name: 555 Timer
+  category: Basic
+  body: {renderer: timer_555, width: 180, height: 220, pin_pitch: 36}
+  parameters: {part: {required: false}, role: {required: false}}
+  pins:
+    - {number: "1", name: GND, aliases: [GROUND, VSS], side: bottom, position: 4, electrical_type: power_in}
+    - {number: "2", name: TRIG, aliases: [TRIGGER], side: left, position: 3, electrical_type: input}
+    - {number: "3", name: OUT, aliases: [OUTPUT], side: right, position: 3, electrical_type: output}
+    - {number: "4", name: RESET, aliases: [RST], side: top, position: 4, electrical_type: input}
+    - {number: "5", name: CTRL, aliases: [CONTROL, CV], side: bottom, position: 2, electrical_type: input}
+    - {number: "6", name: THRESH, aliases: [THRESHOLD], side: left, position: 4, electrical_type: input}
+    - {number: "7", name: DISCH, aliases: [DISCHARGE], side: left, position: 2, electrical_type: open_drain}
+    - {number: "8", name: VCC, aliases: [VDD, V+], side: top, position: 2, electrical_type: power_in}
+- id: BASIC_NMOS
+  name: N-MOSFET
+  category: Basic
+  body: {renderer: nmos, width: 140, height: 120, pin_pitch: 40}
+  parameters: {part: {required: false}, role: {required: false}}
+  pins:
+    - {number: "1", name: G, aliases: [GATE], side: left, position: 1, electrical_type: input}
+    - {number: "2", name: D, aliases: [DRAIN], side: top, position: 2, electrical_type: passive}
+    - {number: "3", name: S, aliases: [SOURCE], side: bottom, position: 2, electrical_type: passive}
+  metadata: {mosfet_mode: enhancement, show_body_diode: false, generic_symbol: true}
+- id: BASIC_PMOS
+  name: P-MOSFET
+  category: Basic
+  body: {renderer: pmos, width: 140, height: 120, pin_pitch: 40}
+  parameters: {part: {required: false}, role: {required: false}}
+  pins:
+    - {number: "1", name: G, aliases: [GATE], side: left, position: 1, electrical_type: input}
+    - {number: "2", name: D, aliases: [DRAIN], side: bottom, position: 2, electrical_type: passive}
+    - {number: "3", name: S, aliases: [SOURCE], side: top, position: 2, electrical_type: passive}
+  metadata: {mosfet_mode: enhancement, show_body_diode: false, generic_symbol: true}
+- id: BASIC_GROUND
+  name: Ground
+  category: Basic
+  body: {renderer: ground, width: 120, height: 80, pin_pitch: 20}
+  pins:
+    - {number: "1", name: GND, aliases: [0V], side: top, position: 3, electrical_type: power_in}
+- id: BASIC_TEST_POINT
+  name: Test Point
+  category: Basic
+  body: {renderer: test_point, width: 90, height: 70, pin_pitch: 35}
+  parameters: {role: {required: false}}
+  pins:
+    - {number: "1", name: TP, aliases: [POINT], side: left, position: 1, electrical_type: passive}

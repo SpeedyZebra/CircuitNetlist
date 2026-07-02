@@ -1,0 +1,35 @@
+- id: LIGHT_LED_WHITE
+  name: White LED
+  category: Lighting
+  body: {renderer: led, width: 140, height: 100, pin_pitch: 40}
+  parameters: {vf: {required: false, unit: V}, current: {required: false, unit: A}, internally_regulated: {required: false}}
+  pins: &ledpins
+    - {number: "1", name: A, aliases: [ANODE], side: left, position: 1, electrical_type: passive}
+    - {number: "2", name: K, aliases: [CATHODE], side: right, position: 1, electrical_type: passive}
+- id: LIGHT_LED_RED
+  name: Red LED
+  category: Lighting
+  body: {renderer: led, width: 140, height: 100, pin_pitch: 40}
+  parameters: {vf: {required: false, unit: V}, current: {required: false, unit: A}, internally_regulated: {required: false}}
+  pins: *ledpins
+- id: LIGHT_LED_GREEN
+  name: Green LED
+  category: Lighting
+  body: {renderer: led, width: 140, height: 100, pin_pitch: 40}
+  parameters: {vf: {required: false, unit: V}, current: {required: false, unit: A}, internally_regulated: {required: false}}
+  pins: *ledpins
+- id: LIGHT_LED_BLUE
+  name: Blue LED
+  category: Lighting
+  body: {renderer: led, width: 140, height: 100, pin_pitch: 40}
+  parameters: {vf: {required: false, unit: V}, current: {required: false, unit: A}, internally_regulated: {required: false}}
+  pins: *ledpins
+- id: LIGHT_LED_RGB_ADDRESSABLE
+  name: Addressable RGB LED
+  category: Lighting
+  body: {renderer: functional_block, width: 160, height: 130, pin_pitch: 30}
+  pins:
+    - {number: "1", name: VDD, aliases: [VCC], side: left, position: 1, electrical_type: power_in}
+    - {number: "2", name: GND, aliases: [], side: left, position: 3, electrical_type: power_in}
+    - {number: "3", name: DIN, aliases: [], side: right, position: 1, electrical_type: input}
+    - {number: "4", name: DOUT, aliases: [], side: right, position: 3, electrical_type: output}

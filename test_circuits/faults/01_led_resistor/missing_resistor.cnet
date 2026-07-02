@@ -1,0 +1,12 @@
+CIRCUIT Fault_LED_Missing_Resistor
+
+COMPONENT V1 POWER_DC_SOURCE voltage=5V
+COMPONENT LED1 LIGHT_LED_RED vf=2.0V current=10mA
+
+NET VCC:
+    V1.POS
+    LED1.A
+
+NET GND:
+    V1.NEG
+    LED1.K

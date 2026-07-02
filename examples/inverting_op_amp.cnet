@@ -1,0 +1,38 @@
+# Inverting op amp example.
+# Ideal closed-loop gain is VOUT / VIN = -R2 / R1.
+
+CIRCUIT Inverting_Op_Amp
+
+COMPONENT VIN POWER_DC_SOURCE voltage=1V role=signal_source
+COMPONENT VPLUS POWER_DC_SOURCE voltage=12V role=positive_supply
+COMPONENT VMINUS POWER_DC_SOURCE voltage=-12V role=negative_supply
+COMPONENT U1 BASIC_OP_AMP part=generic role=inverting_amplifier
+COMPONENT R1 BASIC_RESISTOR value=10kohm role=input
+COMPONENT R2 BASIC_RESISTOR value=100kohm role=feedback
+
+NET VIN:
+    VIN.POS
+    R1.1
+
+NET SUMMING:
+    R1.2
+    R2.1
+    U1.IN-
+
+NET VOUT:
+    U1.OUT
+    R2.2
+
+NET GND:
+    VIN.NEG
+    VPLUS.NEG
+    VMINUS.POS
+    U1.IN+
+
+NET VDD:
+    VPLUS.POS
+    U1.V+
+
+NET VSS:
+    VMINUS.NEG
+    U1.V-

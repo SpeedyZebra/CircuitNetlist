@@ -1,0 +1,40 @@
+# 555 timer 50% duty-cycle astable oscillator example.
+# Based on the Electronics Tutorials 50% Duty Cycle Astable Oscillator topology.
+
+CIRCUIT Timer_555_50_Duty_Astable
+
+COMPONENT V1 POWER_DC_SOURCE voltage=5V role=supply
+COMPONENT U1 BASIC_555_TIMER part=NE555 role=astable_oscillator
+COMPONENT R1 BASIC_RESISTOR value=100kohm role=timing
+COMPONENT R2 BASIC_RESISTOR value=100kohm role=output_feedback
+COMPONENT C1 BASIC_CAPACITOR_CERAMIC value=100nF role=timing
+COMPONENT C2 BASIC_CAPACITOR_CERAMIC value=10nF role=control_bypass
+COMPONENT TP_OUT BASIC_TEST_POINT role=oscillator_output
+
+NET VCC:
+    V1.POS
+    U1.VCC
+    U1.RESET
+    R1.1
+
+NET TIMING:
+    R1.2
+    R2.2
+    U1.TRIG
+    U1.THRESH
+    C1.1
+
+NET OUT:
+    U1.OUT
+    R2.1
+    TP_OUT.TP
+
+NET CONTROL:
+    U1.CTRL
+    C2.1
+
+NET GND:
+    V1.NEG
+    U1.GND
+    C1.2
+    C2.2

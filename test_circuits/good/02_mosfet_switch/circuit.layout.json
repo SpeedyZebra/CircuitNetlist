@@ -1,0 +1,53 @@
+{
+  "components": {
+    "V1": {
+      "x": 120,
+      "y": 120,
+      "rotation": 0,
+      "locked": false
+    },
+    "Q1": {
+      "x": 520,
+      "y": 120,
+      "rotation": 0,
+      "locked": false
+    },
+    "U1": {
+      "x": 520,
+      "y": 400,
+      "rotation": 0,
+      "locked": false
+    },
+    "LED1": {
+      "x": 960,
+      "y": 120,
+      "rotation": 0,
+      "locked": false
+    },
+    "R_GATE": {
+      "x": 960,
+      "y": 400,
+      "rotation": 0,
+      "locked": false
+    },
+    "R_LED": {
+      "x": 960,
+      "y": 640,
+      "rotation": 0,
+      "locked": false
+    },
+    "R_PULL": {
+      "x": 960,
+      "y": 880,
+      "rotation": 0,
+      "locked": false
+    }
+  },
+  "nets": {},
+  "wire_waypoints": {},
+  "canvas": {
+    "grid": 40,
+    "width": 1600,
+    "height": 1200
+  }
+}

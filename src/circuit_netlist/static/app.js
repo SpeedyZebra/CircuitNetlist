@@ -1,0 +1,445 @@
+let state = { circuit: null, layout: null, svg: "", scale: 1, panX: 0, panY: 0, selected: null, drag: null, current: null, catalog: null, expected: null, localFile: null, localLayoutFile: null };
+const canvas = document.querySelector("#canvas");
+const statusEl = document.querySelector("#status");
+
+async function loadAll({ fresh = false } = {}) {
+  try {
+    const [components, circuit] = await Promise.all([
+      fetchJson(`/api/components?t=${Date.now()}`, { cache: "no-store" }),
+      fetchJson(`/api/circuit?t=${Date.now()}${fresh ? "&fresh=true" : ""}`, { cache: "no-store" })
+    ]);
+    state.circuit = circuit.circuit;
+    state.layout = circuit.layout;
+    state.svg = circuit.svg;
+    state.current = circuit.current || null;
+    state.expected = circuit.expected || null;
+    renderLibrary(components.components || []);
+    applySchematic(circuit);
+    statusEl.textContent = `${state.circuit?.name || "Circuit"} loaded${fresh ? " from generated layout" : ""}`;
+  } catch (err) {
+    statusEl.textContent = `Reload failed: ${err.message}`;
+  }
+}
+
+function applySchematic(payload) {
+  const schematic = payload.schematic || payload;
+  state.circuit = schematic.circuit;
+  state.layout = schematic.layout;
+  state.svg = schematic.svg;
+  state.current = payload.current || state.current;
+  state.expected = payload.expected || null;
+  clearSelection();
+  canvas.innerHTML = state.svg || "";
+  bindSvg();
+  renderDiagnostics(payload.diagnostics || []);
+  renderExpected(payload.expected || null);
+  updateCurrentCircuitLabel();
+  fitSchematic();
+}
+
+async function rerouteCurrentLayout() {
+  const button = document.querySelector("#reroute");
+  statusEl.textContent = "Rerouting...";
+  button.disabled = true;
+  const started = performance.now();
+  try {
+    if (!state.layout) throw new Error("layout is not loaded yet");
+    const routed = await fetchJson("/api/layout/autoroute", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ layout: state.layout })
+    }, 20000);
+    state.layout = routed.layout;
+    state.svg = routed.svg;
+    canvas.innerHTML = state.svg;
+    bindSvg();
+    renderDiagnostics(routed.diagnostics || []);
+    fitSchematic();
+    const elapsed = ((performance.now() - started) / 1000).toFixed(1);
+    statusEl.textContent = `Rerouted current layout in ${elapsed}s`;
+  } catch (err) {
+    statusEl.textContent = `Reroute failed: ${err.message}`;
+  } finally {
+    button.disabled = false;
+  }
+}
+
+async function fetchJson(url, options = {}, timeoutMs = 15000) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(url, { ...options, signal: controller.signal });
+    const text = await response.text();
+    if (!response.ok) {
+      throw new Error(text || `${response.status} ${response.statusText}`);
+    }
+    return text ? JSON.parse(text) : {};
+  } catch (err) {
+    if (err.name === "AbortError") throw new Error(`request timed out after ${Math.round(timeoutMs / 1000)}s`);
+    throw err;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+function renderLibrary(items) {
+  const groups = {};
+  for (const item of items) (groups[item.category] ||= []).push(item);
+  document.querySelector("#library").innerHTML = Object.entries(groups).map(([category, comps]) =>
+    `<div class="category"><strong>${category}</strong>${comps.map(c => `<div class="component-type" data-id="${c.id}">${c.id}</div>`).join("")}</div>`
+  ).join("");
+}
+
+function renderDiagnostics(diags) {
+  document.querySelector("#diagnostics").innerHTML = diags.length ? diags.map(d =>
+    `<div class="diag ${d.severity}">${d.severity}${d.code ? ` ${escapeHtml(d.code)}` : ""}: ${escapeHtml(d.message)}</div>`
+  ).join("") : `<div class="diag">No validation errors</div>`;
+}
+
+function renderExpected(expected) {
+  const el = document.querySelector("#expected-results");
+  if (!el) return;
+  if (!expected) {
+    el.innerHTML = `<div class="diag">No expected-result metadata</div>`;
+    return;
+  }
+  const expectedCodes = expected.codes || [];
+  const actualCodes = expected.actual_codes || [];
+  const status = expected.match === null || expected.match === undefined ? "N/A" : expected.match ? "MATCH" : "MISMATCH";
+  el.innerHTML = `
+    <div class="diag ${expected.match ? "" : "WARNING"}"><strong>Status:</strong> ${status}</div>
+    <div class="prop-row"><strong>Expected</strong><br>${expectedCodes.length ? expectedCodes.map(escapeHtml).join("<br>") : "Expected clean result"}</div>
+    <div class="prop-row"><strong>Actual</strong><br>${actualCodes.length ? actualCodes.map(escapeHtml).join("<br>") : "Actual clean result"}</div>
+  `;
+}
+
+function updateCurrentCircuitLabel() {
+  const label = document.querySelector("#current-circuit");
+  const current = state.current;
+  const name = current?.current_circuit_name || state.circuit?.name || "Circuit";
+  const file = current?.source_filename || "";
+  label.textContent = `Current circuit: ${name}${file ? ` / ${file}` : ""}`;
+}
+
+function bindSvg() {
+  const svg = document.querySelector("#schematic");
+  if (!svg) return;
+  svg.classList.toggle("grid-hidden", !document.querySelector("#grid-toggle").checked);
+  svg.addEventListener("wheel", onWheel, { passive: false });
+  svg.addEventListener("pointerdown", onPointerDown);
+  svg.addEventListener("pointermove", onPointerMove);
+  svg.addEventListener("pointerup", onPointerUp);
+  svg.addEventListener("pointerleave", onPointerUp);
+  svg.querySelectorAll(".component").forEach(el => el.addEventListener("click", selectComponent));
+  svg.querySelectorAll(".pin").forEach(el => {
+    el.addEventListener("click", selectPin);
+    el.addEventListener("mouseenter", () => statusEl.textContent = `${el.dataset.ref}.${el.dataset.pinName} ${el.dataset.electricalType}`);
+  });
+  svg.querySelectorAll(".wire,.net").forEach(el => el.addEventListener("click", selectNet));
+  svg.querySelectorAll(".net-label-endpoint,.power-symbol,.label-flag,.power-shape,.net-label").forEach(el => el.addEventListener("click", selectNet));
+}
+
+function svgPoint(evt) {
+  const svg = document.querySelector("#schematic");
+  const pt = svg.createSVGPoint();
+  pt.x = evt.clientX; pt.y = evt.clientY;
+  return pt.matrixTransform(svg.getScreenCTM().inverse());
+}
+
+function onWheel(evt) {
+  evt.preventDefault();
+  const svg = document.querySelector("#schematic");
+  const vb = svg.viewBox.baseVal;
+  const factor = evt.deltaY < 0 ? 0.9 : 1.1;
+  const p = svgPoint(evt);
+  vb.x = p.x - (p.x - vb.x) * factor;
+  vb.y = p.y - (p.y - vb.y) * factor;
+  vb.width *= factor;
+  vb.height *= factor;
+}
+
+function onPointerDown(evt) {
+  const component = evt.target.closest(".component");
+  const p = svgPoint(evt);
+  if (component) {
+    const ref = component.dataset.ref;
+    const placement = state.layout.components[ref];
+    state.drag = { type: "component", ref, start: p, x: placement.x, y: placement.y };
+    component.setPointerCapture(evt.pointerId);
+  } else {
+    const svg = document.querySelector("#schematic");
+    const vb = svg.viewBox.baseVal;
+    state.drag = { type: "pan", startClientX: evt.clientX, startClientY: evt.clientY, x: vb.x, y: vb.y, w: vb.width, h: vb.height };
+  }
+}
+
+function onPointerMove(evt) {
+  if (!state.drag) return;
+  const svg = document.querySelector("#schematic");
+  if (state.drag.type === "pan") {
+    const vb = svg.viewBox.baseVal;
+    vb.x = state.drag.x - (evt.clientX - state.drag.startClientX) * vb.width / svg.clientWidth;
+    vb.y = state.drag.y - (evt.clientY - state.drag.startClientY) * vb.height / svg.clientHeight;
+    return;
+  }
+  const p = svgPoint(evt);
+  const snap = document.querySelector("#snap-toggle").checked ? (state.layout.canvas.grid || 20) : 1;
+  const nx = Math.round((state.drag.x + p.x - state.drag.start.x) / snap) * snap;
+  const ny = Math.round((state.drag.y + p.y - state.drag.start.y) / snap) * snap;
+  state.layout.components[state.drag.ref] = { ...(state.layout.components[state.drag.ref] || {}), x: nx, y: ny };
+  if (state.current) state.current.layout_dirty = true;
+  document.querySelector(`#component-${cssSafe(state.drag.ref)}`).setAttribute("transform", `translate(${nx},${ny}) rotate(0)`);
+  statusEl.textContent = `${state.drag.ref} ${nx}, ${ny}`;
+}
+
+function onPointerUp() { state.drag = null; }
+
+function selectComponent(evt) {
+  evt.stopPropagation();
+  clearSelection();
+  const el = evt.currentTarget;
+  el.classList.add("selected");
+  state.selected = el.dataset.ref;
+  const comp = state.circuit.components.find(c => c.ref === el.dataset.ref);
+  document.querySelector("#properties").innerHTML = rows({ Reference: comp.ref, Type: comp.component_id, Parameters: JSON.stringify(comp.parameters) });
+}
+
+function selectPin(evt) {
+  evt.stopPropagation();
+  const p = evt.currentTarget.dataset;
+  document.querySelector("#properties").innerHTML = rows({ Component: p.ref, Pin: `${p.pinNumber} ${p.pinName}`, Type: p.electricalType, Net: findPinNet(p.ref, p.pinName) || "" });
+}
+
+function selectNet(evt) {
+  evt.stopPropagation();
+  const net = evt.currentTarget.dataset.net || evt.currentTarget.closest("[data-net]")?.dataset.net;
+  const group = document.querySelector(`#net-${cssSafe(net)}`);
+  const style = group?.dataset.renderStyle || "local_wire";
+  document.querySelectorAll(".net").forEach(n => n.classList.toggle("highlight", n.dataset.net === net));
+  document.querySelector("#properties").innerHTML = rows({ Net: net, "Render style": style });
+  statusEl.textContent = `Selected net ${net}`;
+}
+
+function findPinNet(ref, pinName) {
+  for (const net of state.circuit.nets) {
+    if (net.pins.some(p => p.component_ref === ref && (p.pin_name === pinName || p.resolved_name === pinName))) return net.name;
+  }
+}
+
+function rows(obj) {
+  return Object.entries(obj).map(([k, v]) => `<div class="prop-row"><strong>${k}</strong><br>${String(v ?? "")}</div>`).join("");
+}
+
+function clearSelection() {
+  document.querySelectorAll(".component.selected").forEach(e => e.classList.remove("selected"));
+}
+
+function cssSafe(value) { return CSS.escape(value); }
+
+document.querySelector("#reload").addEventListener("click", async () => {
+  statusEl.textContent = "Reloading...";
+  try {
+    const payload = await fetchJson("/api/circuit/reload", { method: "POST" }, 20000);
+    if (!payload.success) {
+      renderLoadErrors(payload);
+      statusEl.textContent = "Reload found errors";
+      return;
+    }
+    applySchematic(payload);
+    statusEl.textContent = `Reloaded ${payload.circuit_name}`;
+  } catch (err) {
+    statusEl.textContent = `Reload failed: ${err.message}`;
+  }
+});
+document.querySelector("#reroute").addEventListener("click", rerouteCurrentLayout);
+document.querySelector("#save-layout").addEventListener("click", async () => {
+  await fetch("/api/layout/save", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ layout: state.layout }) });
+  if (state.current) state.current.layout_dirty = false;
+  statusEl.textContent = "Layout saved";
+});
+document.querySelector("#export-svg").addEventListener("click", () => window.open("/api/export/svg", "_blank"));
+document.querySelector("#export-png").addEventListener("click", () => alert("PNG export uses browser conversion in a future version; SVG export is available now."));
+document.querySelector("#fit").addEventListener("click", () => {
+  fitSchematic();
+});
+document.querySelector("#reset").addEventListener("click", () => loadAll({ fresh: true }));
+document.querySelector("#grid-toggle").addEventListener("change", () => document.querySelector("#schematic")?.classList.toggle("grid-hidden", !document.querySelector("#grid-toggle").checked));
+document.querySelector("#search").addEventListener("input", evt => {
+  const q = evt.target.value.toLowerCase();
+  document.querySelectorAll(".component").forEach(el => el.classList.toggle("search-hit", q && el.dataset.ref.toLowerCase().includes(q)));
+  document.querySelectorAll(".net").forEach(el => el.classList.toggle("highlight", q && el.dataset.net.toLowerCase().includes(q)));
+});
+
+loadAll();
+
+document.querySelector("#load-circuit").addEventListener("click", openLoadModal);
+document.querySelectorAll(".tab").forEach(button => button.addEventListener("click", () => switchTab(button.dataset.tab)));
+document.querySelector("#circuit-filter").addEventListener("input", renderCatalogLists);
+document.querySelector("#local-cnet").addEventListener("change", onLocalFileSelected);
+document.querySelector("#local-layout").addEventListener("change", evt => state.localLayoutFile = evt.target.files?.[0] || null);
+document.querySelector("#load-local").addEventListener("click", loadLocalFile);
+setupDragDrop();
+
+async function openLoadModal() {
+  document.querySelector("#load-modal").showModal();
+  document.querySelector("#load-errors").innerHTML = "";
+  await loadCatalog();
+}
+
+function switchTab(name) {
+  document.querySelectorAll(".tab").forEach(tab => tab.classList.toggle("active", tab.dataset.tab === name));
+  document.querySelectorAll(".tab-panel").forEach(panel => panel.classList.toggle("active", panel.id === `tab-${name}`));
+}
+
+async function loadCatalog() {
+  if (!state.catalog) {
+    state.catalog = await fetchJson(`/api/circuits?t=${Date.now()}`, { cache: "no-store" });
+  }
+  renderCatalogLists();
+}
+
+function renderCatalogLists() {
+  if (!state.catalog) return;
+  const q = document.querySelector("#circuit-filter").value.toLowerCase();
+  renderCaseList("#examples-list", state.catalog.examples || [], q);
+  renderCaseList("#regression-good-list", state.catalog.regression?.good || [], q);
+  renderCaseList("#regression-fault-list", state.catalog.regression?.faults || [], q);
+}
+
+function renderCaseList(selector, items, query) {
+  const filtered = items.filter(item => matchesCase(item, query));
+  document.querySelector(selector).innerHTML = filtered.length ? filtered.map(item => `
+    <article class="case-card">
+      <div><strong>${escapeHtml(item.title)}</strong> <span class="badge">${escapeHtml(item.type || item.kind)}</span></div>
+      <div class="muted">${escapeHtml(item.path)}</div>
+      <div>${escapeHtml(item.description || "")}</div>
+      <div class="muted">${item.component_count} components, ${item.net_count} nets</div>
+      <div class="codes">${(item.expected_codes || []).map(code => `<code>${escapeHtml(code)}</code>`).join(" ")}</div>
+      <button type="button" data-case-id="${escapeHtml(item.id)}">Load</button>
+    </article>
+  `).join("") : `<div class="diag">No circuits match</div>`;
+  document.querySelectorAll(`${selector} [data-case-id]`).forEach(button => {
+    button.addEventListener("click", () => loadCase(button.dataset.caseId));
+  });
+}
+
+function matchesCase(item, query) {
+  if (!query) return true;
+  return [item.title, item.path, item.description, item.family, item.kind, ...(item.expected_codes || [])].join(" ").toLowerCase().includes(query);
+}
+
+async function loadCase(caseId) {
+  if (!confirmDiscardLayout()) return;
+  statusEl.textContent = "Loading circuit...";
+  const payload = await fetchJson("/api/circuit/load-case", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ case_id: caseId })
+  }, 20000);
+  if (!payload.success) {
+    renderLoadErrors(payload);
+    statusEl.textContent = `Could not load ${caseId}`;
+    return;
+  }
+  applySchematic(payload);
+  document.querySelector("#load-modal").close();
+  statusEl.textContent = `Loaded ${payload.circuit_name}: ${payload.schematic.circuit.components.length} components, ${payload.schematic.circuit.nets.length} nets`;
+}
+
+async function onLocalFileSelected(evt) {
+  state.localFile = evt.target.files?.[0] || null;
+  if (!state.localFile) return;
+  const text = await state.localFile.text();
+  const lines = text.split(/\r?\n/).slice(0, 60).join("\n");
+  const name = (text.match(/^\s*CIRCUIT\s+([A-Za-z_][A-Za-z0-9_]*)/m) || [])[1] || "unknown";
+  document.querySelector("#file-preview").textContent = `${state.localFile.name} (${state.localFile.size} bytes)\nDetected circuit: ${name}\n\n${lines}`;
+}
+
+async function loadLocalFile() {
+  if (!confirmDiscardLayout()) return;
+  if (!state.localFile) {
+    renderLoadErrors({ diagnostics: [{ severity: "ERROR", message: "Choose a .cnet file first." }] });
+    return;
+  }
+  if (!state.localFile.name.toLowerCase().endsWith(".cnet")) {
+    renderLoadErrors({ diagnostics: [{ severity: "ERROR", message: "Only .cnet files are supported." }] });
+    return;
+  }
+  const text = await state.localFile.text();
+  const layoutText = state.localLayoutFile ? await state.localLayoutFile.text() : null;
+  const payload = await fetchJson("/api/circuit/load-text", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ filename: state.localFile.name, text, layout_text: layoutText })
+  }, 20000);
+  if (!payload.success) {
+    renderLoadErrors(payload);
+    statusEl.textContent = `Could not load ${state.localFile.name}`;
+    return;
+  }
+  applySchematic(payload);
+  document.querySelector("#load-modal").close();
+  statusEl.textContent = `Loaded ${payload.filename}`;
+}
+
+function confirmDiscardLayout() {
+  if (!state.current?.layout_dirty) return true;
+  return confirm("Current layout has unsaved changes. Load another circuit anyway?");
+}
+
+function renderLoadErrors(payload) {
+  const findings = payload.diagnostics || payload.validation || [];
+  document.querySelector("#load-errors").innerHTML = findings.length ? findings.map(d =>
+    `<div class="diag ${d.severity || "ERROR"}">${escapeHtml(d.severity || "ERROR")}${d.code ? ` ${escapeHtml(d.code)}` : ""}: ${escapeHtml(d.message || String(d))}</div>`
+  ).join("") : `<div class="diag ERROR">Load failed</div>`;
+}
+
+function setupDragDrop() {
+  const overlay = document.querySelector("#drop-overlay");
+  ["dragenter", "dragover"].forEach(name => canvas.addEventListener(name, evt => {
+    evt.preventDefault();
+    overlay.classList.add("visible");
+  }));
+  ["dragleave", "drop"].forEach(name => canvas.addEventListener(name, evt => {
+    evt.preventDefault();
+    if (name === "dragleave") overlay.classList.remove("visible");
+  }));
+  canvas.addEventListener("drop", async evt => {
+    overlay.classList.remove("visible");
+    const files = [...(evt.dataTransfer?.files || [])];
+    const cnet = files.find(file => file.name.toLowerCase().endsWith(".cnet"));
+    const layout = files.find(file => file.name.toLowerCase().endsWith(".layout.json") || file.name.toLowerCase().endsWith(".json"));
+    if (!cnet) {
+      statusEl.textContent = "Drop a .cnet file to load a circuit";
+      return;
+    }
+    state.localFile = cnet;
+    state.localLayoutFile = layout || null;
+    await loadLocalFile();
+  });
+}
+
+function escapeHtml(value) {
+  return String(value ?? "").replace(/[&<>"']/g, ch => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch]));
+}
+
+function fitSchematic() {
+  const svg = document.querySelector("#schematic");
+  const content = svg?.querySelector("#wires, #components");
+  if (!svg || !content) return;
+  let box;
+  try {
+    box = svg.querySelector("#wires").getBBox();
+    const componentBox = svg.querySelector("#components").getBBox();
+    const minX = Math.min(box.x, componentBox.x);
+    const minY = Math.min(box.y, componentBox.y);
+    const maxX = Math.max(box.x + box.width, componentBox.x + componentBox.width);
+    const maxY = Math.max(box.y + box.height, componentBox.y + componentBox.height);
+    box = { x: minX, y: minY, width: maxX - minX, height: maxY - minY };
+  } catch {
+    return;
+  }
+  if (!box.width || !box.height) return;
+  const pad = Math.max(box.width, box.height) * 0.08;
+  svg.setAttribute("viewBox", `${box.x - pad} ${box.y - pad} ${box.width + pad * 2} ${box.height + pad * 2}`);
+}

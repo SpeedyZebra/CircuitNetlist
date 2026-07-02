@@ -1,0 +1,71 @@
+# Solar LED controller example.
+# The white LED is powered from the 1S battery through a resistor and low-side NMOS.
+# LED current varies with battery voltage here; use a constant-current driver for tighter brightness control.
+
+CIRCUIT Solar_LED_Controller
+
+COMPONENT PANEL1 POWER_SOLAR_PANEL_5V_2W
+COMPONENT CHG1 POWER_CHARGER_BQ25185_BLOCK
+COMPONENT BAT1 POWER_LIPO_1S capacity=1000mAh
+COMPONENT U1 MCU_ATtiny402_SOIC8
+COMPONENT Q1 BASIC_NMOS
+COMPONENT LED1 LIGHT_LED_WHITE vf=3.0V current=20mA
+COMPONENT R_LED BASIC_RESISTOR value=68ohm
+COMPONENT R_GATE BASIC_RESISTOR value=100ohm
+COMPONENT R_PULL BASIC_RESISTOR value=100kohm
+COMPONENT R_SUN_TOP BASIC_RESISTOR value=220kohm
+COMPONENT R_SUN_BOT BASIC_RESISTOR value=100kohm
+COMPONENT R_BAT_TOP BASIC_RESISTOR value=220kohm
+COMPONENT R_BAT_BOT BASIC_RESISTOR value=100kohm
+COMPONENT C1 BASIC_CAPACITOR_CERAMIC value=100nF
+
+NET PANEL_POS:
+    PANEL1.POS
+    CHG1.VIN
+    R_SUN_TOP.1
+
+NET VBAT:
+    CHG1.BAT
+    BAT1.POS
+    U1.VDD
+    C1.1
+    R_LED.1
+    R_BAT_TOP.1
+
+NET GND:
+    PANEL1.NEG
+    CHG1.GND
+    BAT1.NEG
+    U1.GND
+    C1.2
+    Q1.S
+    R_PULL.2
+    R_SUN_BOT.2
+    R_BAT_BOT.2
+
+NET SUN_SENSE:
+    R_SUN_TOP.2
+    R_SUN_BOT.1
+    U1.PA6
+
+NET BAT_SENSE:
+    R_BAT_TOP.2
+    R_BAT_BOT.1
+    U1.PA1
+
+NET LED_ANODE:
+    R_LED.2
+    LED1.A
+
+NET LED_SWITCH:
+    LED1.K
+    Q1.D
+
+NET LED_ENABLE:
+    U1.PA7
+    R_GATE.1
+    R_PULL.1
+
+NET MOSFET_GATE:
+    R_GATE.2
+    Q1.G

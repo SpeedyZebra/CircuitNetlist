@@ -1,0 +1,88 @@
+version: 1
+circuits:
+  good/01_led_resistor/circuit.cnet:
+    parse: pass
+    validation: pass
+    expected_codes: []
+    render_allowed: true
+    expected_components: 3
+    expected_nets: [VCC, LED_ANODE, GND]
+  good/02_mosfet_switch/circuit.cnet:
+    parse: pass
+    validation: pass
+    expected_codes: []
+    render_allowed: true
+    expected_components: 7
+    expected_nets: [VCC, LED_ANODE, LED_SWITCH, CTRL, GATE, GND]
+  good/03_voltage_divider_adc/circuit.cnet:
+    parse: pass
+    validation: pass
+    expected_codes: []
+    render_allowed: true
+    expected_components: 4
+    expected_nets: [VIN, ADC_SENSE, GND]
+
+  faults/01_led_resistor/missing_resistor.cnet:
+    parse: pass
+    validation: pass
+    expected_codes: [ERC_LED_NO_CURRENT_LIMIT]
+    render_allowed: true
+  faults/01_led_resistor/reversed_led.cnet:
+    parse: pass
+    validation: pass
+    expected_codes: [ERC_LED_POLARITY_REVERSED]
+    render_allowed: true
+  faults/01_led_resistor/led_terminals_shorted.cnet:
+    parse: pass
+    validation: fail
+    expected_codes: [ERC_LED_TERMINALS_SHORTED]
+    allowed_codes: [ERC_LED_NO_CURRENT_LIMIT]
+    render_allowed: true
+  faults/01_led_resistor/power_ground_short.cnet:
+    parse: pass
+    validation: fail
+    expected_codes: [VALIDATION_PIN_MULTIPLE_NETS, ERC_POWER_GND_SHORT]
+    render_allowed: false
+  faults/01_led_resistor/invalid_pin.cnet:
+    parse: pass
+    validation: fail
+    expected_codes: [VALIDATION_UNKNOWN_PIN]
+    render_allowed: false
+  faults/01_led_resistor/unknown_component.cnet:
+    parse: pass
+    validation: fail
+    expected_codes: [VALIDATION_UNKNOWN_COMPONENT, VALIDATION_UNKNOWN_REF]
+    render_allowed: false
+
+  faults/02_mosfet_switch/floating_gate.cnet:
+    parse: pass
+    validation: pass
+    expected_codes: [ERC_MOSFET_GATE_FLOATING]
+    allowed_codes: [ERC_MOSFET_GATE_NO_PULLDOWN]
+    render_allowed: true
+  faults/02_mosfet_switch/missing_gate_pulldown.cnet:
+    parse: pass
+    validation: pass
+    expected_codes: [ERC_MOSFET_GATE_NO_PULLDOWN]
+    render_allowed: true
+  faults/02_mosfet_switch/source_not_ground.cnet:
+    parse: pass
+    validation: pass
+    expected_codes: [ERC_MOSFET_SOURCE_NOT_GROUND]
+    render_allowed: true
+
+  faults/03_voltage_divider_adc/midpoint_shorted_to_ground.cnet:
+    parse: pass
+    validation: pass
+    expected_codes: [ERC_DIVIDER_MIDPOINT_GROUNDED]
+    render_allowed: true
+  faults/03_voltage_divider_adc/adc_unconnected.cnet:
+    parse: pass
+    validation: pass
+    expected_codes: [ERC_ADC_PIN_UNCONNECTED]
+    render_allowed: true
+  faults/03_voltage_divider_adc/missing_bottom_resistor.cnet:
+    parse: pass
+    validation: pass
+    expected_codes: [ERC_DIVIDER_BOTTOM_MISSING]
+    render_allowed: true

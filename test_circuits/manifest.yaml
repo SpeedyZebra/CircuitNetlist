@@ -1,0 +1,63 @@
+version: 1
+name: Circuit Netlist Regression Suite
+cases:
+  - id: 01_led_resistor_good
+    family: 01_led_resistor
+    type: good
+    path: good/01_led_resistor/circuit.cnet
+  - id: 02_mosfet_switch_good
+    family: 02_mosfet_switch
+    type: good
+    path: good/02_mosfet_switch/circuit.cnet
+  - id: 03_voltage_divider_adc_good
+    family: 03_voltage_divider_adc
+    type: good
+    path: good/03_voltage_divider_adc/circuit.cnet
+  - id: 01_led_missing_resistor
+    family: 01_led_resistor
+    type: fault
+    path: faults/01_led_resistor/missing_resistor.cnet
+  - id: 01_led_reversed
+    family: 01_led_resistor
+    type: fault
+    path: faults/01_led_resistor/reversed_led.cnet
+  - id: 01_led_terminals_shorted
+    family: 01_led_resistor
+    type: fault
+    path: faults/01_led_resistor/led_terminals_shorted.cnet
+  - id: 01_led_power_ground_short
+    family: 01_led_resistor
+    type: fault
+    path: faults/01_led_resistor/power_ground_short.cnet
+  - id: 01_led_invalid_pin
+    family: 01_led_resistor
+    type: fault
+    path: faults/01_led_resistor/invalid_pin.cnet
+  - id: 01_led_unknown_component
+    family: 01_led_resistor
+    type: fault
+    path: faults/01_led_resistor/unknown_component.cnet
+  - id: 02_mosfet_floating_gate
+    family: 02_mosfet_switch
+    type: fault
+    path: faults/02_mosfet_switch/floating_gate.cnet
+  - id: 02_mosfet_missing_pulldown
+    family: 02_mosfet_switch
+    type: fault
+    path: faults/02_mosfet_switch/missing_gate_pulldown.cnet
+  - id: 02_mosfet_source_not_ground
+    family: 02_mosfet_switch
+    type: fault
+    path: faults/02_mosfet_switch/source_not_ground.cnet
+  - id: 03_divider_midpoint_grounded
+    family: 03_voltage_divider_adc
+    type: fault
+    path: faults/03_voltage_divider_adc/midpoint_shorted_to_ground.cnet
+  - id: 03_divider_adc_unconnected
+    family: 03_voltage_divider_adc
+    type: fault
+    path: faults/03_voltage_divider_adc/adc_unconnected.cnet
+  - id: 03_divider_missing_bottom
+    family: 03_voltage_divider_adc
+    type: fault
+    path: faults/03_voltage_divider_adc/missing_bottom_resistor.cnet

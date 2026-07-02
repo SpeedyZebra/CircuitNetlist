@@ -1,0 +1,37 @@
+CIRCUIT Good_MOSFET_Switch
+
+COMPONENT V1 POWER_DC_SOURCE voltage=5V
+COMPONENT U1 MCU_ATtiny402_SOIC8
+COMPONENT R_LED BASIC_RESISTOR value=220ohm role=current_limit
+COMPONENT LED1 LIGHT_LED_RED vf=2.0V current=10mA
+COMPONENT R_GATE BASIC_RESISTOR value=100ohm role=gate_resistor
+COMPONENT R_PULL BASIC_RESISTOR value=100kohm role=pulldown
+COMPONENT Q1 BASIC_NMOS role=low_side_switch
+
+NET VCC:
+    V1.POS
+    U1.VDD
+    R_LED.1
+
+NET LED_ANODE:
+    R_LED.2
+    LED1.A
+
+NET LED_SWITCH:
+    LED1.K
+    Q1.D
+
+NET CTRL:
+    U1.PA7
+    R_GATE.1
+
+NET GATE:
+    R_GATE.2
+    R_PULL.1
+    Q1.G
+
+NET GND:
+    V1.NEG
+    U1.GND
+    R_PULL.2
+    Q1.S

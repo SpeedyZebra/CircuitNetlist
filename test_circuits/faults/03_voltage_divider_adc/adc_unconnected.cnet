@@ -1,0 +1,20 @@
+CIRCUIT Fault_Divider_ADC_Unconnected
+
+COMPONENT V1 POWER_DC_SOURCE voltage=5V
+COMPONENT U1 MCU_ATtiny402_SOIC8
+COMPONENT R_TOP BASIC_RESISTOR value=100kohm role=divider_top
+COMPONENT R_BOTTOM BASIC_RESISTOR value=100kohm role=divider_bottom
+
+NET VIN:
+    V1.POS
+    U1.VDD
+    R_TOP.1
+
+NET ADC_SENSE:
+    R_TOP.2
+    R_BOTTOM.1
+
+NET GND:
+    V1.NEG
+    R_BOTTOM.2
+    U1.GND
