@@ -6,7 +6,8 @@ from circuit_netlist.component_library import load_component_library
 from circuit_netlist.models import Layout, Placement
 from circuit_netlist.parser import NetlistParser
 from circuit_netlist.placement import DeterministicPlacementEngine
-from circuit_netlist.topology import ComponentRole, PatternType, TopologyAnalyzer
+from circuit_netlist.topology import CapacitorRole, ComponentRole, PatternType, TopologyAnalyzer
+from circuit_netlist.validator import CircuitValidator
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -151,6 +152,61 @@ def test_component_role_inference_does_not_depend_on_reference_names() -> None:
     assert analysis.component_roles["D4"] == ComponentRole.LOAD
 
 
+def test_every_explicit_component_role_is_supported_and_exposed() -> None:
+    for role in ComponentRole:
+        text = f"""CIRCUIT Role_{role.value}
+COMPONENT X BASIC_TEST_POINT role={role.value}
+NET N [allow_single]:
+    X.TP
+"""
+        _, _, analysis = analyze_text(text)
+        assert analysis.component_roles["X"] == role
+        assert analysis.component_role_sources["X"] == "explicit"
+        assert analysis.component_role_reasons["X"] == f"role={role.value}"
+
+
+def test_explicit_role_overrides_library_inference() -> None:
+    _, _, analysis = analyze_text("""CIRCUIT Explicit
+COMPONENT U7 MCU_ATtiny402_SOIC8 role=sensor
+NET VDD [allow_single]:
+    U7.VDD
+NET GND [allow_single]:
+    U7.GND
+""")
+    assert analysis.component_roles["U7"] == ComponentRole.SENSOR
+    assert analysis.component_role_sources["U7"] == "explicit"
+
+
+def test_invalid_explicit_role_produces_validation_warning() -> None:
+    library = load_component_library(ROOT / "components")
+    circuit, diagnostics = NetlistParser().parse_text("""CIRCUIT BadRole
+COMPONENT TP BASIC_TEST_POINT role=banana_mode
+NET N [allow_single]:
+    TP.TP
+""")
+    assert circuit is not None, diagnostics
+    validation = CircuitValidator(library).validate(circuit)
+    assert any(diag.code == "VALIDATION_UNKNOWN_ROLE" and diag.severity == "WARNING" for diag in validation)
+
+
+def test_net_name_classification_is_ground_first_and_conservative() -> None:
+    net_lines = "\n".join(
+        f"NET {name} [allow_single]:\n    TP.TP"
+        for name in ["0V", "GND", "DGND", "AGND", "PGND", "SGND", "CHASSIS_GND", "VSS", "3V3", "5V", "12V", "-12V", "VBAT", "VCC", "VDD", "ADC_5V_SENSE", "MOTOR_12V_SENSE"]
+    )
+    circuit, diagnostics = NetlistParser().parse_text(f"CIRCUIT Nets\nCOMPONENT TP BASIC_TEST_POINT\n{net_lines}\n")
+    assert circuit is not None, diagnostics
+    analysis = TopologyAnalyzer().analyze(circuit, load_component_library(ROOT / "components"))
+    for name in ["0V", "GND", "DGND", "AGND", "PGND", "SGND", "CHASSIS_GND", "VSS"]:
+        assert name in analysis.ground_nets
+        assert name not in analysis.power_nets
+    for name in ["3V3", "5V", "12V", "-12V", "VBAT", "VCC", "VDD"]:
+        assert name in analysis.power_nets
+        assert name not in analysis.ground_nets
+    assert "ADC_5V_SENSE" not in analysis.power_nets
+    assert "MOTOR_12V_SENSE" not in analysis.power_nets
+
+
 def test_topology_patterns_work_with_arbitrary_component_names() -> None:
     _, _, analysis = analyze_text(RENAMED_SOLAR)
     assert len(patterns(analysis, PatternType.VOLTAGE_DIVIDER)) == 2
@@ -214,3 +270,162 @@ def test_production_placement_has_no_known_solar_reference_hacks() -> None:
     placement_source = (ROOT / "src" / "circuit_netlist" / "placement.py").read_text(encoding="utf-8")
     forbidden = ["R_SUN_TOP", "R_SUN_BOT", "R_BAT_TOP", "R_BAT_BOT", "R_PULL", "R_GATE", "R_LED"]
     assert not [token for token in forbidden if token in placement_source]
+
+
+def test_capacitor_role_classification_is_conservative() -> None:
+    circuit, library, analysis = analyze_text("""CIRCUIT Caps
+COMPONENT VIN POWER_DC_SOURCE voltage=5V
+COMPONENT U1 MCU_ATtiny402_SOIC8
+COMPONENT C100N BASIC_CAPACITOR_CERAMIC value=100nF
+COMPONENT C1U BASIC_CAPACITOR_CERAMIC value=1uF
+COMPONENT C10U BASIC_CAPACITOR_CERAMIC value=10uF role=bulk
+COMPONENT C100U BASIC_CAPACITOR_CERAMIC value=100uF
+COMPONENT C1000U BASIC_CAPACITOR_CERAMIC value=1000uF
+COMPONENT CUNK BASIC_CAPACITOR_CERAMIC
+COMPONENT CMAL BASIC_CAPACITOR_CERAMIC value=not_a_value
+
+NET VDD:
+    VIN.POS
+    U1.VDD
+    C100N.1
+    C1U.1
+    C10U.1
+    C100U.1
+    C1000U.1
+    CUNK.1
+    CMAL.1
+
+NET GND:
+    VIN.NEG
+    U1.GND
+    C100N.2
+    C1U.2
+    C10U.2
+    C100U.2
+    C1000U.2
+    CUNK.2
+    CMAL.2
+""")
+    assert circuit is not None
+    assert library is not None
+    assert analysis.capacitor_roles["C100N"] == CapacitorRole.DECOUPLING
+    assert analysis.capacitor_roles["C1U"] == CapacitorRole.BYPASS
+    assert analysis.capacitor_roles["C10U"] == CapacitorRole.BULK
+    assert analysis.capacitor_role_metadata["C10U"]["confidence"] == 1.0
+    assert analysis.capacitor_roles["C100U"] == CapacitorRole.BULK
+    assert analysis.capacitor_roles["C1000U"] == CapacitorRole.RESERVOIR
+    assert analysis.capacitor_roles["CUNK"] == CapacitorRole.UNKNOWN_POWER_SHUNT
+    assert analysis.capacitor_roles["CMAL"] == CapacitorRole.UNKNOWN_POWER_SHUNT
+    decoupling_refs = {pattern.metadata["capacitor"] for pattern in patterns(analysis, PatternType.DECOUPLING_CAPACITOR)}
+    assert decoupling_refs == {"C100N", "C1U"}
+
+
+def test_repeated_low_side_switches_get_separate_rows() -> None:
+    circuit, library, _ = analyze_text("""CIRCUIT RepeatedSwitches
+COMPONENT V1 POWER_DC_SOURCE voltage=5V
+COMPONENT U1 MCU_ATtiny402_SOIC8
+COMPONENT R_LED1 BASIC_RESISTOR value=220ohm role=current_limit
+COMPONENT LED1 LIGHT_LED_RED
+COMPONENT R_GATE1 BASIC_RESISTOR value=100ohm role=gate_resistor
+COMPONENT R_PULL1 BASIC_RESISTOR value=100kohm role=pulldown
+COMPONENT Q1 BASIC_NMOS role=low_side_switch
+COMPONENT R_LED2 BASIC_RESISTOR value=220ohm role=current_limit
+COMPONENT LED2 LIGHT_LED_RED
+COMPONENT R_GATE2 BASIC_RESISTOR value=100ohm role=gate_resistor
+COMPONENT R_PULL2 BASIC_RESISTOR value=100kohm role=pulldown
+COMPONENT Q2 BASIC_NMOS role=low_side_switch
+
+NET VCC:
+    V1.POS
+    U1.VDD
+    R_LED1.1
+    R_LED2.1
+
+NET LED1_ANODE:
+    R_LED1.2
+    LED1.A
+
+NET LED1_SWITCH:
+    LED1.K
+    Q1.D
+
+NET CTRL1:
+    U1.PA7
+    R_GATE1.1
+
+NET GATE1:
+    R_GATE1.2
+    R_PULL1.1
+    Q1.G
+
+NET LED2_ANODE:
+    R_LED2.2
+    LED2.A
+
+NET LED2_SWITCH:
+    LED2.K
+    Q2.D
+
+NET CTRL2:
+    U1.PA6
+    R_GATE2.1
+
+NET GATE2:
+    R_GATE2.2
+    R_PULL2.1
+    Q2.G
+
+NET GND:
+    V1.NEG
+    U1.GND
+    R_PULL1.2
+    Q1.S
+    R_PULL2.2
+    Q2.S
+""")
+    layout = DeterministicPlacementEngine().place(circuit, library)
+    assert layout.components["Q1"].y != layout.components["Q2"].y
+    assert len({(layout.components[ref].x, layout.components[ref].y) for ref in ["Q1", "Q2", "LED1", "LED2", "R_LED1", "R_LED2", "R_GATE1", "R_GATE2", "R_PULL1", "R_PULL2"]}) == 10
+
+
+def test_repeated_decoupling_and_rc_filters_do_not_stack() -> None:
+    circuit, library, _ = analyze_text("""CIRCUIT RepeatedPassives
+COMPONENT VIN POWER_DC_SOURCE voltage=5V
+COMPONENT U1 MCU_ATtiny402_SOIC8
+COMPONENT C1 BASIC_CAPACITOR_CERAMIC value=100nF
+COMPONENT C2 BASIC_CAPACITOR_CERAMIC value=1uF
+COMPONENT R1 BASIC_RESISTOR value=1kohm
+COMPONENT CF1 BASIC_CAPACITOR_CERAMIC value=100nF
+COMPONENT R2 BASIC_RESISTOR value=2kohm
+COMPONENT CF2 BASIC_CAPACITOR_CERAMIC value=220nF
+
+NET VDD:
+    VIN.POS
+    U1.VDD
+    C1.1
+    C2.1
+    R1.1
+    R2.1
+
+NET A_FILTER:
+    R1.2
+    CF1.1
+    U1.PA6
+
+NET B_FILTER:
+    R2.2
+    CF2.1
+    U1.PA7
+
+NET GND:
+    VIN.NEG
+    U1.GND
+    C1.2
+    C2.2
+    CF1.2
+    CF2.2
+""")
+    layout = DeterministicPlacementEngine().place(circuit, library)
+    assert (layout.components["C1"].x, layout.components["C1"].y) != (layout.components["C2"].x, layout.components["C2"].y)
+    assert (layout.components["R1"].x, layout.components["R1"].y) != (layout.components["R2"].x, layout.components["R2"].y)
+    assert (layout.components["CF1"].x, layout.components["CF1"].y) != (layout.components["CF2"].x, layout.components["CF2"].y)

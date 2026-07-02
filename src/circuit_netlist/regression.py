@@ -53,6 +53,34 @@ class CaseResult:
     json_path: str | None = None
 
 
+def compare_diagnostic_codes(
+    expected_codes: list[str],
+    actual_codes: list[str],
+    allowed_codes: list[str] | None = None,
+) -> tuple[list[str], list[str], bool]:
+    """Compare diagnostic code multisets without suppressing any namespace."""
+    allowed = set(allowed_codes or [])
+    expected_counts = _code_counts(expected_codes)
+    actual_counts = _code_counts([code for code in actual_codes if code not in allowed])
+    missing: list[str] = []
+    unexpected: list[str] = []
+    for code in sorted(set(expected_counts) | set(actual_counts)):
+        expected_count = expected_counts.get(code, 0)
+        actual_count = actual_counts.get(code, 0)
+        if actual_count < expected_count:
+            missing.extend([code] * (expected_count - actual_count))
+        if actual_count > expected_count:
+            unexpected.extend([code] * (actual_count - expected_count))
+    return missing, unexpected, not missing and not unexpected
+
+
+def _code_counts(codes: list[str]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for code in codes:
+        counts[code] = counts.get(code, 0) + 1
+    return counts
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Run Circuit Netlist regression cases.")
     parser.add_argument("--all", action="store_true", help="Run all manifest cases.")
@@ -152,17 +180,14 @@ class RegressionRunner:
 
     def _finalize(self, result: CaseResult, diagnostics: list[Diagnostic], expected: dict[str, Any]) -> CaseResult:
         expected_codes = list(expected.get("expected_codes", []))
-        actual_codes = sorted({diag.code for diag in diagnostics if diag.code})
+        actual_codes = sorted(diag.code for diag in diagnostics if diag.code)
         result.diagnostics = [diag.model_dump(mode="json") for diag in diagnostics]
         result.expected_codes = expected_codes
         result.actual_codes = actual_codes
-        result.missing_expected_codes = [code for code in expected_codes if code not in actual_codes]
-        result.unexpected_codes = [
-            code
-            for code in actual_codes
-            if code.startswith(("ERC_", "VALIDATION_", "PARSE_")) and code not in expected_codes and code not in set(expected.get("allowed_codes", []))
-        ]
-        result.expected_match = not result.missing_expected_codes and not result.unexpected_codes
+        missing, unexpected, matched = compare_diagnostic_codes(expected_codes, actual_codes, list(expected.get("allowed_codes", [])))
+        result.missing_expected_codes = missing
+        result.unexpected_codes = unexpected
+        result.expected_match = matched
         expected_parse = expected.get("parse", "pass")
         expected_validation = expected.get("validation", "pass")
         stage_match = result.parse == expected_parse and (expected_validation == "any" or result.validation == expected_validation)

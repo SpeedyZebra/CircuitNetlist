@@ -15,7 +15,7 @@ from .exporters import export_svg
 from .models import Circuit, Diagnostic, Layout, RenderedCircuit, Severity
 from .parser import NetlistParser
 from .placement import DeterministicPlacementEngine
-from .regression import detect_patterns, engineering_calculations, visual_drc
+from .regression import compare_diagnostic_codes, detect_patterns, engineering_calculations, visual_drc
 from .renderer import render_circuit
 from .router import ManhattanRouter
 from .topology import TopologyAnalyzer
@@ -204,7 +204,7 @@ def parse_layout_text(layout_text: str | None) -> Layout | None:
 
 
 def compare_expected_codes(expected: list[str], actual: list[str]) -> bool:
-    return not [code for code in expected if code not in actual] and not [code for code in actual if code.startswith(("ERC_", "VALIDATION_", "PARSE_")) and code not in expected]
+    return compare_diagnostic_codes(expected, actual)[2]
 
 
 def circuit_catalog() -> dict[str, Any]:

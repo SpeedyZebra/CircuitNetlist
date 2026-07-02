@@ -13,7 +13,7 @@ GRAMMAR = r"""
 start: circuit component* net*
 circuit: "CIRCUIT" NAME
 component: "COMPONENT" REF NAME param*
-net: "NET" NAME net_option? ":" pinref+
+net: "NET" NET_NAME net_option? ":" pinref+
 net_option: "[" "allow_single" "]"
 pinref: REF "." PIN
 param: NAME "=" value
@@ -23,6 +23,7 @@ value: ESCAPED_STRING -> string
 REF: /[A-Z][A-Za-z0-9_]*/
 PIN: /[A-Za-z0-9_+\-]+/
 NAME: /[A-Za-z_][A-Za-z0-9_]*/
+NET_NAME: /[+\-]?[A-Za-z0-9_][A-Za-z0-9_+\-]*/
 VALUE: /"[^"]*"|[^\s#]+/
 COMMENT: /#[^\n]*/
 %import common.ESCAPED_STRING
@@ -32,8 +33,8 @@ COMMENT: /#[^\n]*/
 """
 
 
-VALUE_RE = re.compile(r"^(?P<num>[+-]?(?:\d+(?:\.\d*)?|\.\d+))(?P<suffix>[pnumkM]?)(?P<unit>ohm|mAh|Ah|V|A|W|F|H)?$")
-SUFFIXES = {"": 1.0, "p": 1e-12, "n": 1e-9, "u": 1e-6, "m": 1e-3, "k": 1e3, "M": 1e6}
+VALUE_RE = re.compile(r"^(?P<num>[+-]?(?:\d+(?:\.\d*)?|\.\d+))(?P<suffix>[pnu\u00b5\u03bcmkM]?)(?P<unit>ohm|mAh|Ah|V|A|W|F|H)?$")
+SUFFIXES = {"": 1.0, "p": 1e-12, "n": 1e-9, "u": 1e-6, "\u00b5": 1e-6, "\u03bc": 1e-6, "m": 1e-3, "k": 1e3, "M": 1e6}
 
 
 def parse_engineering_value(text: str) -> EngineeringValue:
@@ -90,6 +91,9 @@ class NetlistTransformer(Transformer):
         return str(items[0])
 
     def NAME(self, token: Token) -> str:
+        return str(token)
+
+    def NET_NAME(self, token: Token) -> str:
         return str(token)
 
     def REF(self, token: Token) -> str:

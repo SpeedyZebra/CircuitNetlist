@@ -24,11 +24,36 @@ The analyzer currently infers:
 - `source`: DC sources, solar panels, and power-output components.
 - `storage`: LiPo/Li-ion battery components.
 - `charger`: charger/power-management blocks with charger metadata or `VIN`/`BAT` pins.
+- `regulator`: explicit regulator role annotations.
 - `controller`: MCUs, op amps, and 555 timers.
+- `sensor`: explicit sensor role annotations.
 - `switch`: NMOS and PMOS symbols.
 - `load`: LEDs and lighting components.
+- `protection`: explicit protection role annotations.
+- `connector`: explicit connector role annotations.
 - `passive`: resistors, capacitors, polarized capacitors, and inductors.
 - `unknown`: components without enough information.
+
+Explicit `role=` parameters take precedence over library-derived inference when they map to a supported `ComponentRole`. Local schematic intent roles such as `current_limit`, `gate_resistor`, `divider_top`, `pulldown`, `timing`, and `feedback` remain valid annotations and map to the closest broad role. Unknown role text emits `VALIDATION_UNKNOWN_ROLE` so typos are visible.
+
+## Net Classification
+
+Ground classification is ground-first. `0V`, `GND`, `DGND`, `AGND`, `PGND`, `SGND`, `CHASSIS_GND`, and `VSS` are ground nets, not power nets.
+
+Power classification is intentionally conservative. Common rails such as `VCC`, `VDD`, `VBAT`, `VIN`, `3V3`, `5V`, `12V`, `+5V`, and `-12V` are power nets. Sense nets such as `ADC_5V_SENSE` and `MOTOR_12V_SENSE` are not treated as power rails just because they contain a voltage-like substring.
+
+## Capacitor Roles
+
+Power-to-ground capacitors are classified before decoupling patterns are emitted:
+
+- `decoupling`: small local IC rail capacitors.
+- `bypass`: moderate local IC rail capacitors.
+- `bulk`: larger rail shunt capacitors.
+- `reservoir`: very large capacitors near a source or storage rail.
+- `filter`: explicit filter role annotations.
+- `unknown_power_shunt`: power shunts with missing, malformed, or ambiguous value data.
+
+Only high-confidence `decoupling` and `bypass` capacitors become `DECOUPLING_CAPACITOR` placement patterns. Bulk and reservoir capacitors remain classified but are not forced into IC-local decoupling placement.
 
 ## Pattern Detectors
 
@@ -67,6 +92,13 @@ Placement only applies pattern-specific rules when confidence is at least `MIN_P
 - LED current-limit resistors are horizontal in the load branch.
 - Low-side MOSFET switches group MOSFET, gate resistor, pull-down, and LED branch.
 - RC low-pass filters keep the resistor horizontal and capacitor vertical.
+- Repeated topology groups allocate deterministic rows or slots instead of stacking at identical coordinates. This covers repeated LED/MOSFET switch channels, multiple decouplers for the same target, repeated dividers, and repeated RC filters.
+
+## Regression Integrity
+
+Regression expected-code matching is strict. Unexpected `DRC_`, `ERC_`, `VALIDATION_`, and `PARSE_` diagnostics fail a case unless the case explicitly lists them in `expected_codes` or `allowed_codes`. Duplicate diagnostic counts are compared as multisets so repeated warnings cannot disappear inside sorting.
+
+Visual DRC regressions should be fixed in placement/routing/rendering code rather than hidden by the expected-code file.
 
 ## Determinism
 
@@ -89,6 +121,16 @@ The app also exposes:
 ```text
 GET /api/circuit/topology
 ```
+
+## Source Archive
+
+A clean source ZIP can be created with:
+
+```powershell
+py -3.11 tools/create_source_archive.py
+```
+
+The archive excludes generated regression output, caches, virtual environments, build folders, Git metadata, coverage artifacts, and ZIP files.
 
 ## Current Limitations
 

@@ -59,7 +59,7 @@ class DeterministicPlacementEngine:
                 y += height + self.y_gap
 
     def _place_patterns(self, circuit: Circuit, library: ComponentLibrary, layout: Layout, analysis: TopologyAnalysis) -> None:
-        self._place_led_current_limits(layout, analysis)
+        self._place_led_current_limits(circuit, layout, analysis)
         self._place_gate_resistors(layout, analysis)
         self._place_low_side_switches(circuit, library, layout, analysis)
         self._place_voltage_dividers(circuit, layout, analysis)
@@ -67,47 +67,61 @@ class DeterministicPlacementEngine:
         self._place_decoupling(circuit, library, layout, analysis)
         self._place_rc_filters(layout, analysis)
 
-    def _place_led_current_limits(self, layout: Layout, analysis: TopologyAnalysis) -> None:
-        for pattern in self._strong_patterns(analysis, PatternType.LED_CURRENT_LIMIT):
+    def _place_led_current_limits(self, circuit: Circuit, layout: Layout, analysis: TopologyAnalysis) -> None:
+        for index, pattern in enumerate(self._strong_patterns(analysis, PatternType.LED_CURRENT_LIMIT)):
+            y = 300 + index * 240
+            switch_y = 400 + index * 240
             resistor = pattern.metadata.get("resistor")
             led = pattern.metadata.get("led")
-            if isinstance(resistor, str):
-                self._set(layout, resistor, 760, 300, 0)
-            if isinstance(led, str):
-                self._set(layout, led, 960, 300, 0)
+            shared_net = str(pattern.metadata.get("shared_net", ""))
+            led_left = self._led_pin_net(circuit, led, "A") == shared_net if isinstance(led, str) else True
+            if led_left:
+                if isinstance(resistor, str):
+                    self._set(layout, resistor, 760, y, 0)
+                if isinstance(led, str):
+                    self._set(layout, led, 960, y, 0)
+            else:
+                if isinstance(led, str):
+                    self._set(layout, led, 760, y, 0)
+                if isinstance(resistor, str):
+                    self._set(layout, resistor, 1040, y, 0)
+            for switch_ref in self._switches_on_nets(circuit, set(pattern.net_names)):
+                self._set(layout, switch_ref, 1160, switch_y, 0)
 
     def _place_gate_resistors(self, layout: Layout, analysis: TopologyAnalysis) -> None:
-        for pattern in self._strong_patterns(analysis, PatternType.SERIES_GATE_RESISTOR):
+        for index, pattern in enumerate(self._strong_patterns(analysis, PatternType.SERIES_GATE_RESISTOR)):
+            y = 400 + index * 240
             driver = pattern.metadata.get("driver_component")
             resistor = pattern.metadata.get("gate_resistor")
             mosfet = pattern.metadata.get("mosfet")
             if isinstance(driver, str):
-                self._set(layout, driver, 520, 400, 0)
+                self._set(layout, driver, 520, y, 0)
             if isinstance(resistor, str):
-                self._set(layout, resistor, 960, 520, 0)
+                self._set(layout, resistor, 960, y + 120, 0)
             if isinstance(mosfet, str):
-                self._set(layout, mosfet, 1160, 400, 0)
+                self._set(layout, mosfet, 1160, y, 0)
 
     def _place_low_side_switches(self, circuit: Circuit, library: ComponentLibrary, layout: Layout, analysis: TopologyAnalysis) -> None:
-        for pattern in self._strong_patterns(analysis, PatternType.LOW_SIDE_MOSFET_SWITCH):
+        for index, pattern in enumerate(self._strong_patterns(analysis, PatternType.LOW_SIDE_MOSFET_SWITCH)):
+            y = 400 + index * 280
             mosfet = str(pattern.metadata.get("mosfet", ""))
             if not mosfet or self._is_locked(layout, mosfet):
                 continue
-            self._set(layout, mosfet, 1160, 400, 0)
+            self._set(layout, mosfet, 1160, y, 0)
             gate_resistor = pattern.metadata.get("gate_resistor")
             if isinstance(gate_resistor, str):
-                self._set(layout, gate_resistor, 960, 520, 0)
+                self._set(layout, gate_resistor, 960, y + 120, 0)
             pull_down = pattern.metadata.get("pull_down")
             if isinstance(pull_down, str):
-                self._set(layout, pull_down, 960, 700, 90)
+                self._set(layout, pull_down, 960, y + 300, 90)
             load_pattern = pattern.metadata.get("load_pattern")
             if isinstance(load_pattern, dict):
                 resistor = load_pattern.get("metadata", {}).get("resistor")
                 led = load_pattern.get("metadata", {}).get("led")
                 if isinstance(resistor, str):
-                    self._set(layout, resistor, 760, 300, 0)
+                    self._set(layout, resistor, 760, y - 100, 0)
                 if isinstance(led, str):
-                    self._set(layout, led, 960, 300, 0)
+                    self._set(layout, led, 960, y - 100, 0)
             driver = next((ref for ref in pattern.component_refs if analysis.component_roles.get(ref) == ComponentRole.CONTROLLER), None)
             if driver:
                 self._set(layout, driver, 520, 400, 0)
@@ -124,10 +138,18 @@ class DeterministicPlacementEngine:
                 self._set(layout, bottom, x, 960, 90)
 
     def _place_pull_resistors(self, layout: Layout, analysis: TopologyAnalysis) -> None:
+        low_side_pull_refs = {
+            pull_down
+            for low_side in self._strong_patterns(analysis, PatternType.LOW_SIDE_MOSFET_SWITCH)
+            for pull_down in [low_side.metadata.get("pull_down")]
+            if isinstance(pull_down, str)
+        }
         occupied = 0
         for pattern in [*self._strong_patterns(analysis, PatternType.PULL_DOWN), *self._strong_patterns(analysis, PatternType.PULL_UP)]:
             resistor = pattern.metadata.get("resistor")
             if not isinstance(resistor, str):
+                continue
+            if resistor in low_side_pull_refs:
                 continue
             if pattern.pattern_type == PatternType.PULL_DOWN:
                 self._set(layout, resistor, 800 + occupied * 160, 560, 90)
@@ -136,30 +158,37 @@ class DeterministicPlacementEngine:
             occupied += 1
 
     def _place_decoupling(self, circuit: Circuit, library: ComponentLibrary, layout: Layout, analysis: TopologyAnalysis) -> None:
+        target_slots: dict[str, int] = {}
+        fallback_slot = 0
         for pattern in self._strong_patterns(analysis, PatternType.DECOUPLING_CAPACITOR):
             capacitor = pattern.metadata.get("capacitor")
             target = pattern.metadata.get("target_component")
             if not isinstance(capacitor, str):
                 continue
             if isinstance(target, str) and target in layout.components:
+                slot = target_slots.get(target, 0)
+                target_slots[target] = slot + 1
                 target_placement = layout.components[target]
                 target_instance = next((component for component in circuit.components if component.ref == target), None)
                 target_definition = library.get(target_instance.component_id) if target_instance else None
                 target_height = component_size(target_definition, target_placement)[1] if target_definition else 160
-                self._set(layout, capacitor, target_placement.x + 40, target_placement.y + target_height + 240, 90)
+                self._set(layout, capacitor, target_placement.x + 40 + slot * 140, target_placement.y + target_height + 240, 90)
             else:
+                fallback_slot += 1
                 placement = layout.components.get(capacitor)
-                if placement and not placement.locked:
-                    placement.rotation = 90
+                if placement and not placement.locked and capacitor not in getattr(self, "_existing_refs", set()):
+                    self._set(layout, capacitor, placement.x + fallback_slot * 140, placement.y, 90)
 
     def _place_rc_filters(self, layout: Layout, analysis: TopologyAnalysis) -> None:
-        for pattern in self._strong_patterns(analysis, PatternType.RC_LOWPASS):
+        for index, pattern in enumerate(self._strong_patterns(analysis, PatternType.RC_LOWPASS)):
+            default = Placement(x=780, y=640 + index * 180)
             resistor = pattern.metadata.get("resistor")
             capacitor = pattern.metadata.get("capacitor")
             if isinstance(resistor, str):
-                self._set(layout, resistor, layout.components.get(resistor, Placement(x=780, y=640)).x, layout.components.get(resistor, Placement(x=780, y=640)).y, 0)
+                placement = layout.components.get(resistor, default)
+                self._set(layout, resistor, placement.x, default.y, 0)
             if isinstance(capacitor, str):
-                base = layout.components.get(resistor, Placement(x=780, y=640)) if isinstance(resistor, str) else Placement(x=780, y=640)
+                base = layout.components.get(resistor, default) if isinstance(resistor, str) else default
                 self._set(layout, capacitor, base.x + 160, base.y + 120, 90)
 
     def _choose_two_pin_orientations(self, circuit: Circuit, layout: Layout, analysis: TopologyAnalysis) -> None:
@@ -243,6 +272,24 @@ class DeterministicPlacementEngine:
     def _is_locked(self, layout: Layout, ref: str) -> bool:
         placement = layout.components.get(ref)
         return bool((placement and placement.locked) or ref in getattr(self, "_existing_refs", set()))
+
+    def _led_pin_net(self, circuit: Circuit, ref: object, pin_name: str) -> str | None:
+        if not isinstance(ref, str):
+            return None
+        for net in circuit.nets:
+            if any(pin.component_ref == ref and pin.pin_name == pin_name for pin in net.pins):
+                return net.name
+        return None
+
+    def _switches_on_nets(self, circuit: Circuit, net_names: set[str]) -> list[str]:
+        refs: list[str] = []
+        for component in sorted(circuit.components, key=lambda item: item.ref):
+            if component.component_id not in {"BASIC_NMOS", "BASIC_PMOS"}:
+                continue
+            connected = {net.name for net in circuit.nets for pin in net.pins if pin.component_ref == component.ref}
+            if connected & net_names:
+                refs.append(component.ref)
+        return refs
 
     def _snap(self, value: int) -> int:
         return round(value / self.grid) * self.grid

@@ -2,7 +2,7 @@ from pathlib import Path
 
 import yaml
 
-from circuit_netlist.regression import RegressionRunner, engineering_calculations, main
+from circuit_netlist.regression import RegressionRunner, compare_diagnostic_codes, engineering_calculations, main
 from circuit_netlist.component_library import load_component_library
 from circuit_netlist.parser import NetlistParser
 
@@ -24,6 +24,48 @@ def test_expected_results_schema_vertical_slice() -> None:
         assert "parse" in circuits[case["path"]]
         assert "validation" in circuits[case["path"]]
         assert "expected_codes" in circuits[case["path"]]
+
+
+def test_diagnostic_code_compare_fails_unexpected_drc_code() -> None:
+    missing, unexpected, matched = compare_diagnostic_codes(["ERC_LED_POLARITY_REVERSED"], ["ERC_LED_POLARITY_REVERSED", "DRC_WIRE_SYMBOL_OVERLAP"])
+    assert missing == []
+    assert unexpected == ["DRC_WIRE_SYMBOL_OVERLAP"]
+    assert matched is False
+
+
+def test_diagnostic_code_compare_fails_unexpected_erc_code() -> None:
+    missing, unexpected, matched = compare_diagnostic_codes([], ["ERC_LED_NO_CURRENT_LIMIT"])
+    assert missing == []
+    assert unexpected == ["ERC_LED_NO_CURRENT_LIMIT"]
+    assert matched is False
+
+
+def test_diagnostic_code_compare_fails_missing_expected_code() -> None:
+    missing, unexpected, matched = compare_diagnostic_codes(["VALIDATION_UNKNOWN_PIN"], [])
+    assert missing == ["VALIDATION_UNKNOWN_PIN"]
+    assert unexpected == []
+    assert matched is False
+
+
+def test_diagnostic_code_compare_passes_matching_codes_independent_of_order() -> None:
+    missing, unexpected, matched = compare_diagnostic_codes(["DRC_A", "ERC_B"], ["ERC_B", "DRC_A"])
+    assert missing == []
+    assert unexpected == []
+    assert matched is True
+
+
+def test_diagnostic_code_compare_counts_duplicates_consistently() -> None:
+    missing, unexpected, matched = compare_diagnostic_codes(["DRC_A"], ["DRC_A", "DRC_A"])
+    assert missing == []
+    assert unexpected == ["DRC_A"]
+    assert matched is False
+
+
+def test_diagnostic_code_compare_does_not_silently_exclude_namespaces() -> None:
+    missing, unexpected, matched = compare_diagnostic_codes([], ["DRC_X", "ERC_X", "VALIDATION_X", "PARSE_X"])
+    assert missing == []
+    assert unexpected == ["DRC_X", "ERC_X", "PARSE_X", "VALIDATION_X"]
+    assert matched is False
 
 
 def test_regression_runner_all_cases_passes_and_writes_report() -> None:

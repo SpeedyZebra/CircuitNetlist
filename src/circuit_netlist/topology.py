@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from enum import Enum
+import re
 from typing import Any
 
 from pydantic import BaseModel, Field
@@ -37,6 +38,15 @@ class PatternType(str, Enum):
     SERIES_ELEMENT = "series_element"
 
 
+class CapacitorRole(str, Enum):
+    DECOUPLING = "decoupling"
+    BYPASS = "bypass"
+    BULK = "bulk"
+    RESERVOIR = "reservoir"
+    FILTER = "filter"
+    UNKNOWN_POWER_SHUNT = "unknown_power_shunt"
+
+
 class TopologyPattern(BaseModel):
     pattern_type: PatternType
     component_refs: list[str]
@@ -47,6 +57,10 @@ class TopologyPattern(BaseModel):
 
 class TopologyAnalysis(BaseModel):
     component_roles: dict[str, ComponentRole]
+    component_role_sources: dict[str, str] = Field(default_factory=dict)
+    component_role_reasons: dict[str, str] = Field(default_factory=dict)
+    capacitor_roles: dict[str, CapacitorRole] = Field(default_factory=dict)
+    capacitor_role_metadata: dict[str, dict[str, Any]] = Field(default_factory=dict)
     patterns: list[TopologyPattern]
     power_nets: set[str] = Field(default_factory=set)
     ground_nets: set[str] = Field(default_factory=set)
@@ -57,26 +71,28 @@ class TopologyAnalysis(BaseModel):
         return [pattern for pattern in self.patterns if pattern.pattern_type == pattern_type]
 
 
-GROUND_NET_NAMES = {"GND", "AGND", "DGND", "PGND", "0V", "VSS"}
-POWER_NET_NAMES = {"VCC", "VDD", "VBAT", "VIN", "PANEL_POS", "3V3", "5V", "12V", "V+"}
+GROUND_NET_NAMES = {"GND", "AGND", "DGND", "PGND", "SGND", "CHASSIS_GND", "0V", "VSS"}
+POWER_NET_NAMES = {"VCC", "VDD", "VBAT", "VIN", "PANEL_POS", "SYS", "3V3", "5V", "12V", "-12V", "+5V", "+3V3", "V+", "V-"}
 MIN_PLACEMENT_PATTERN_CONFIDENCE = 0.75
 
 
 class TopologyAnalyzer:
     def analyze(self, circuit: Circuit, library: ComponentLibrary) -> TopologyAnalysis:
         context = _TopologyContext(circuit, library)
-        roles = {component.ref: self._infer_role(component, context.definition(component.ref), context) for component in sorted(circuit.components, key=lambda item: item.ref)}
+        decisions = {component.ref: self._infer_role_decision(component, context.definition(component.ref), context) for component in sorted(circuit.components, key=lambda item: item.ref)}
+        roles = {ref: decision[0] for ref, decision in decisions.items()}
         power_nets = self._power_nets(context)
         ground_nets = self._ground_nets(context)
         source_nets = self._source_nets(context)
         load_nets = self._load_nets(context, roles)
+        capacitor_roles, capacitor_role_metadata = classify_capacitors(context, power_nets, ground_nets, roles)
 
         patterns: list[TopologyPattern] = []
         patterns.extend(detect_voltage_dividers(context, power_nets, ground_nets))
         divider_resistors = {ref for pattern in patterns if pattern.pattern_type == PatternType.VOLTAGE_DIVIDER for ref in pattern.component_refs}
         patterns.extend(detect_pull_resistors(context, power_nets, ground_nets, divider_resistors))
         pull_resistors = {ref for pattern in patterns if pattern.pattern_type in {PatternType.PULL_UP, PatternType.PULL_DOWN} for ref in pattern.component_refs}
-        patterns.extend(detect_decoupling_capacitors(context, power_nets, ground_nets, roles))
+        patterns.extend(detect_decoupling_capacitors(context, power_nets, ground_nets, roles, capacitor_roles, capacitor_role_metadata))
         patterns.extend(detect_series_gate_resistors(context, roles))
         patterns.extend(detect_led_current_limits(context, power_nets, ground_nets))
         patterns.extend(detect_low_side_mosfet_switches(context, ground_nets, patterns))
@@ -87,6 +103,10 @@ class TopologyAnalyzer:
         patterns.sort(key=lambda item: (item.pattern_type.value, item.component_refs, item.net_names))
         return TopologyAnalysis(
             component_roles=roles,
+            component_role_sources={ref: decision[1] for ref, decision in decisions.items()},
+            component_role_reasons={ref: decision[2] for ref, decision in decisions.items()},
+            capacitor_roles=capacitor_roles,
+            capacitor_role_metadata=capacitor_role_metadata,
             patterns=patterns,
             power_nets=set(sorted(power_nets)),
             ground_nets=set(sorted(ground_nets)),
@@ -95,31 +115,34 @@ class TopologyAnalyzer:
         )
 
     def _infer_role(self, component: ComponentInstance, definition: ComponentDefinition | None, context: "_TopologyContext") -> ComponentRole:
+        return self._infer_role_decision(component, definition, context)[0]
+
+    def _infer_role_decision(self, component: ComponentInstance, definition: ComponentDefinition | None, context: "_TopologyContext") -> tuple[ComponentRole, str, str]:
         explicit = _explicit_role(component)
         if explicit:
             mapped = _role_from_text(explicit)
             if mapped:
-                return mapped
+                return mapped, "explicit", f"role={explicit}"
         if not definition:
-            return ComponentRole.UNKNOWN
+            return ComponentRole.UNKNOWN, "fallback", "unknown component definition"
         component_id = component.component_id.upper()
         renderer = definition.body.renderer
         pin_names = {pin.name.upper() for pin in definition.pins}
         if component_id.startswith(("POWER_LIPO", "POWER_LIION")) or "BATTERY" in definition.name.upper():
-            return ComponentRole.STORAGE
+            return ComponentRole.STORAGE, "library-derived", "battery component metadata"
         if "CHARGER" in component_id or {"VIN", "BAT"}.issubset(pin_names):
-            return ComponentRole.CHARGER
+            return ComponentRole.CHARGER, "library-derived", "charger identifier or VIN/BAT pins"
         if component_id.startswith("POWER_") or any(pin.electrical_type == ElectricalType.power_out for pin in definition.pins):
-            return ComponentRole.SOURCE
+            return ComponentRole.SOURCE, "library-derived", "power component or power_out pin"
         if definition.category == "MCU" or renderer in {"timer_555", "op_amp"}:
-            return ComponentRole.CONTROLLER
+            return ComponentRole.CONTROLLER, "library-derived", "controller-like category or renderer"
         if renderer in {"nmos", "pmos"}:
-            return ComponentRole.SWITCH
+            return ComponentRole.SWITCH, "library-derived", "switch renderer"
         if definition.category == "Lighting" or component_id.startswith("LIGHT_"):
-            return ComponentRole.LOAD
+            return ComponentRole.LOAD, "library-derived", "lighting/load category"
         if definition.category == "Basic" and renderer in {"resistor", "capacitor", "polarized_capacitor", "inductor"}:
-            return ComponentRole.PASSIVE
-        return ComponentRole.UNKNOWN
+            return ComponentRole.PASSIVE, "library-derived", "basic passive renderer"
+        return ComponentRole.UNKNOWN, "fallback", "no role inference matched"
 
     def _power_nets(self, context: "_TopologyContext") -> set[str]:
         nets = {net.name for net in context.circuit.nets if _is_power_net_name(net.name)}
@@ -266,8 +289,14 @@ def detect_pull_resistors(context: _TopologyContext, power_nets: set[str], groun
     return patterns
 
 
-def detect_decoupling_capacitors(context: _TopologyContext, power_nets: set[str], ground_nets: set[str], roles: dict[str, ComponentRole]) -> list[TopologyPattern]:
-    patterns: list[TopologyPattern] = []
+def classify_capacitors(
+    context: _TopologyContext,
+    power_nets: set[str],
+    ground_nets: set[str],
+    roles: dict[str, ComponentRole],
+) -> tuple[dict[str, CapacitorRole], dict[str, dict[str, Any]]]:
+    capacitor_roles: dict[str, CapacitorRole] = {}
+    metadata: dict[str, dict[str, Any]] = {}
     for capacitor in context.two_pin_passives():
         definition = context.definition(capacitor.ref)
         if not definition or definition.body.renderer not in {"capacitor", "polarized_capacitor"}:
@@ -283,17 +312,64 @@ def detect_decoupling_capacitors(context: _TopologyContext, power_nets: set[str]
             if role in {ComponentRole.CONTROLLER, ComponentRole.CHARGER, ComponentRole.REGULATOR} and {power, ground}.issubset(context.component_nets(ref))
         ]
         targets.sort(key=lambda ref: (0 if roles.get(ref) == ComponentRole.CONTROLLER else 1, ref))
-        confidence = 0.9 if targets else 0.55
-        if confidence >= 0.75:
-            patterns.append(
-                TopologyPattern(
-                    pattern_type=PatternType.DECOUPLING_CAPACITOR,
-                    component_refs=[capacitor.ref, *targets[:1]],
-                    net_names=[power, ground],
-                    confidence=confidence,
-                    metadata={"capacitor": capacitor.ref, "power_net": power, "ground_net": ground, "target_component": targets[0] if targets else None},
-                )
+        capacitance = _capacitance_f(capacitor)
+        role, confidence, reason = _classify_capacitor_role(
+            normalize_role_text(_explicit_role(capacitor) or ""),
+            capacitance,
+            bool(targets),
+            _net_has_source_or_storage(context, power),
+        )
+        capacitor_roles[capacitor.ref] = role
+        metadata[capacitor.ref] = {
+            "capacitor": capacitor.ref,
+            "role": role.value,
+            "confidence": confidence,
+            "reason": reason,
+            "capacitance_f": capacitance,
+            "power_net": power,
+            "ground_net": ground,
+            "target_component": targets[0] if targets else None,
+        }
+    return capacitor_roles, metadata
+
+
+def detect_decoupling_capacitors(
+    context: _TopologyContext,
+    power_nets: set[str],
+    ground_nets: set[str],
+    roles: dict[str, ComponentRole],
+    capacitor_roles: dict[str, CapacitorRole],
+    capacitor_role_metadata: dict[str, dict[str, Any]],
+) -> list[TopologyPattern]:
+    patterns: list[TopologyPattern] = []
+    for capacitor in context.two_pin_passives():
+        definition = context.definition(capacitor.ref)
+        if not definition or definition.body.renderer not in {"capacitor", "polarized_capacitor"}:
+            continue
+        role = capacitor_roles.get(capacitor.ref)
+        role_metadata = capacitor_role_metadata.get(capacitor.ref, {})
+        if role not in {CapacitorRole.DECOUPLING, CapacitorRole.BYPASS} or float(role_metadata.get("confidence", 0.0)) < 0.75:
+            continue
+        nets = sorted(context.component_nets(capacitor.ref))
+        if len(nets) != 2 or not (set(nets) & power_nets) or not (set(nets) & ground_nets):
+            continue
+        power = next(net for net in nets if net in power_nets)
+        ground = next(net for net in nets if net in ground_nets)
+        targets = [
+            ref
+            for ref, role_candidate in sorted(roles.items())
+            if role_candidate in {ComponentRole.CONTROLLER, ComponentRole.CHARGER, ComponentRole.REGULATOR} and {power, ground}.issubset(context.component_nets(ref))
+        ]
+        targets.sort(key=lambda ref: (0 if roles.get(ref) == ComponentRole.CONTROLLER else 1, ref))
+        patterns.append(
+            TopologyPattern(
+                pattern_type=PatternType.DECOUPLING_CAPACITOR,
+                component_refs=[capacitor.ref, *targets[:1]],
+                net_names=[power, ground],
+                confidence=float(role_metadata.get("confidence", 0.75)),
+                metadata=role_metadata,
             )
+        )
     return patterns
 
 
@@ -486,6 +562,52 @@ def _resistors_between(context: _TopologyContext, a: str, b: str) -> list[str]:
     return [resistor.ref for resistor in context.two_pin_passives("resistor") if context.component_nets(resistor.ref) == {a, b}]
 
 
+def _capacitance_f(component: ComponentInstance) -> float | None:
+    value = component.parameters.get("value")
+    numeric = getattr(value, "numeric", None)
+    unit = getattr(value, "unit", None)
+    return float(numeric) if numeric is not None and unit == "F" else None
+
+
+def _classify_capacitor_role(explicit: str, capacitance_f: float | None, has_ic_target: bool, near_source_or_storage: bool) -> tuple[CapacitorRole, float, str]:
+    explicit_map = {
+        "decoupling": CapacitorRole.DECOUPLING,
+        "bypass": CapacitorRole.BYPASS,
+        "control_bypass": CapacitorRole.BYPASS,
+        "bulk": CapacitorRole.BULK,
+        "reservoir": CapacitorRole.RESERVOIR,
+        "filter": CapacitorRole.FILTER,
+    }
+    if explicit in explicit_map:
+        return explicit_map[explicit], 1.0, f"explicit role={explicit}"
+    if capacitance_f is None:
+        if has_ic_target:
+            return CapacitorRole.UNKNOWN_POWER_SHUNT, 0.6, "power shunt near IC but capacitance missing or malformed"
+        return CapacitorRole.UNKNOWN_POWER_SHUNT, 0.5, "power shunt with no strong role evidence"
+    if has_ic_target and capacitance_f <= 220e-9:
+        return CapacitorRole.DECOUPLING, 0.9, "small capacitor across an IC power domain"
+    if has_ic_target and capacitance_f <= 4.7e-6:
+        return CapacitorRole.BYPASS, 0.82, "moderate local bypass capacitor across an IC power domain"
+    if near_source_or_storage and capacitance_f >= 470e-6:
+        return CapacitorRole.RESERVOIR, 0.85, "large capacitor at source or storage rail"
+    if near_source_or_storage and capacitance_f >= 10e-6:
+        return CapacitorRole.BULK, 0.8, "bulk capacitor at source or storage rail"
+    if capacitance_f >= 47e-6:
+        return CapacitorRole.BULK, 0.7, "large rail shunt capacitor"
+    return CapacitorRole.UNKNOWN_POWER_SHUNT, 0.6, "ambiguous power shunt capacitor"
+
+
+def _net_has_source_or_storage(context: _TopologyContext, net_name: str) -> bool:
+    for ref, pin in context.pins_on_net(net_name):
+        instance = context.instances.get(ref)
+        definition = context.definition(ref)
+        if not instance or not definition:
+            continue
+        if instance.component_id.startswith(("POWER_", "POWER_LIPO", "POWER_LIION")) or pin.electrical_type == ElectricalType.power_out:
+            return True
+    return False
+
+
 def _explicit_role(component: ComponentInstance) -> str | None:
     value = component.parameters.get("role")
     if value is None:
@@ -494,7 +616,10 @@ def _explicit_role(component: ComponentInstance) -> str | None:
 
 
 def _role_from_text(text: str) -> ComponentRole | None:
-    normalized = text.lower()
+    normalized = normalize_role_text(text)
+    for role in ComponentRole:
+        if normalized == role.value:
+            return role
     if "source" in normalized or normalized in {"supply"}:
         return ComponentRole.SOURCE
     if "storage" in normalized or "battery" in normalized:
@@ -507,9 +632,48 @@ def _role_from_text(text: str) -> ComponentRole | None:
         return ComponentRole.SWITCH
     if "load" in normalized or "output" in normalized:
         return ComponentRole.LOAD
-    if normalized in {"timing", "feedback", "input", "pulldown", "pullup", "pull_down", "pull_up", "current_limit", "decoupling", "control_bypass"}:
+    if normalized in {"timing", "feedback", "input", "pulldown", "pullup", "pull_down", "pull_up", "current_limit", "gate_resistor", "decoupling", "control_bypass"}:
         return ComponentRole.PASSIVE
     return None
+
+
+KNOWN_LOCAL_ROLE_INTENTS = {
+    "astable_oscillator",
+    "control_bypass",
+    "current_limit",
+    "decoupling",
+    "bulk",
+    "bypass",
+    "divider_bottom",
+    "divider_top",
+    "feedback",
+    "gate_resistor",
+    "input",
+    "inverting_amplifier",
+    "low_side_switch",
+    "negative_supply",
+    "oscillator_output",
+    "output_feedback",
+    "positive_supply",
+    "pulldown",
+    "pullup",
+    "pull_down",
+    "pull_up",
+    "signal_source",
+    "reservoir",
+    "filter",
+    "supply",
+    "timing",
+}
+
+
+def normalize_role_text(text: str) -> str:
+    return text.strip().lower().replace("-", "_").replace(" ", "_")
+
+
+def is_supported_role_text(text: str) -> bool:
+    normalized = normalize_role_text(text)
+    return normalized in KNOWN_LOCAL_ROLE_INTENTS or any(normalized == role.value for role in ComponentRole)
 
 
 def _is_ground_net_name(name: str) -> bool:
@@ -518,4 +682,10 @@ def _is_ground_net_name(name: str) -> bool:
 
 def _is_power_net_name(name: str) -> bool:
     upper = name.upper()
-    return upper in POWER_NET_NAMES or upper.endswith("V") and any(ch.isdigit() for ch in upper)
+    if _is_ground_net_name(upper):
+        return False
+    if upper in POWER_NET_NAMES:
+        return True
+    if upper.endswith("_SENSE") or "SENSE" in upper:
+        return False
+    return bool(re.fullmatch(r"[+-]?\d+(?:V\d*)?", upper))

@@ -51,7 +51,7 @@ circuits:
   faults/01_led_resistor/unknown_component.cnet:
     parse: pass
     validation: fail
-    expected_codes: [VALIDATION_UNKNOWN_COMPONENT, VALIDATION_UNKNOWN_REF]
+    expected_codes: [VALIDATION_UNKNOWN_COMPONENT, VALIDATION_UNKNOWN_REF, VALIDATION_UNKNOWN_REF]
     render_allowed: false
 
   faults/02_mosfet_switch/floating_gate.cnet:

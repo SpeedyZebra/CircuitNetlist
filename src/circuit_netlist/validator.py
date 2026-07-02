@@ -4,6 +4,7 @@ from collections import defaultdict
 
 from .component_library import ComponentLibrary
 from .models import Circuit, Diagnostic, EngineeringValue, Severity
+from .topology import is_supported_role_text
 
 
 SUPPLY_NAMES = {"VBAT", "VCC", "VDD", "VIN", "PANEL_POS", "SYS", "+5V", "+3V3"}
@@ -48,6 +49,10 @@ class CircuitValidator:
             for name, value in component.parameters.items():
                 if isinstance(value, EngineeringValue) and value.numeric is None and name in allowed:
                     diagnostics.append(Diagnostic(severity=Severity.ERROR, code="VALIDATION_BAD_VALUE", message=f"{component.ref}.{name} has unsupported value format: {value.original}", component_ref=component.ref, file=source, source_file=source, line=component.line, metadata={"parameter": name, "value": value.original}))
+                if name == "role":
+                    role_text = str(getattr(value, "original", value))
+                    if not is_supported_role_text(role_text):
+                        diagnostics.append(Diagnostic(severity=Severity.WARNING, code="VALIDATION_UNKNOWN_ROLE", message=f"{component.ref} has unsupported role intent: {role_text}", component_ref=component.ref, file=source, source_file=source, line=component.line, metadata={"role": role_text}))
 
         pin_assignments: dict[tuple[str, str], str] = {}
         for net in circuit.nets:

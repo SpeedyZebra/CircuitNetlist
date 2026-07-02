@@ -6,7 +6,11 @@ __pycache__/
 .mypy_cache/
 .ruff_cache/
 .coverage
+coverage.xml
 htmlcov/
+dist/
+build/
+*.egg-info/
 
 # Virtual environments
 .venv/
@@ -16,6 +20,7 @@ env/
 # Local/generated output
 output/
 test_circuits/generated/
+*.zip
 
 # OS/editor noise
 .DS_Store
