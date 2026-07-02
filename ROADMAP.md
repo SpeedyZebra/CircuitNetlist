@@ -59,3 +59,23 @@ Still intentionally limited to Milestone 1.2 scope:
 - No renderer rewrite.
 - No router replacement.
 - No general-purpose optimizer or constraint solver.
+
+## Milestone 1.3 - component-size-aware functional-group envelopes
+
+Status: complete
+
+Implemented in this branch:
+
+- Functional-group envelopes derived from actual oriented member body bounds.
+- Normalized local group positions with conservative routing, pin escape, text, and power/ground margins.
+- Lane spacing based on calculated group width and height.
+- Debug records for group local positions, oriented bounds, body union, margins, envelope, lane, origin, and fallback geometry.
+- Variable-size full-pipeline tests for oversized MOSFET channels, dividers, RC filters, decoupling banks, controllers, and rotated parts.
+- Conservative fallback geometry for missing or invalid component dimensions.
+
+Still intentionally limited to Milestone 1.3 scope:
+
+- No canonical scene tree.
+- No renderer rewrite.
+- No router replacement.
+- No global placement optimizer or constraint solver.

@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Protocol
 
 from .component_library import ComponentLibrary
 from .geometry import component_size
-from .models import Circuit, Layout, Placement
+from .models import Circuit, ComponentInstance, Layout, Placement
 from .topology import ComponentRole, MIN_PLACEMENT_PATTERN_CONFIDENCE, PatternType, TopologyAnalysis, TopologyAnalyzer, TopologyPattern
 
 MIN_COMPONENT_GAP = 40
@@ -18,26 +18,67 @@ class PlacementEngine(Protocol):
 
 
 @dataclass
-class FunctionalGroupBounds:
-    group_id: str
-    pattern_type: PatternType
-    component_refs: list[str]
+class Bounds:
     min_x: float
     min_y: float
     max_x: float
     max_y: float
-    routing_margin_left: float = 120
-    routing_margin_right: float = 120
-    routing_margin_top: float = 120
-    routing_margin_bottom: float = 120
 
     @property
     def width(self) -> float:
-        return self.max_x - self.min_x + self.routing_margin_left + self.routing_margin_right
+        return self.max_x - self.min_x
 
     @property
     def height(self) -> float:
-        return self.max_y - self.min_y + self.routing_margin_top + self.routing_margin_bottom
+        return self.max_y - self.min_y
+
+
+@dataclass
+class FunctionalGroupEnvelope:
+    group_id: str
+    pattern_type: PatternType
+    component_refs: list[str]
+    body_min_x: float
+    body_min_y: float
+    body_max_x: float
+    body_max_y: float
+    expanded_min_x: float
+    expanded_min_y: float
+    expanded_max_x: float
+    expanded_max_y: float
+    margin_left: float
+    margin_right: float
+    margin_top: float
+    margin_bottom: float
+    local_placements: dict[str, Placement] = field(default_factory=dict)
+    oriented_bounds: dict[str, Bounds] = field(default_factory=dict)
+    fallback_refs: list[str] = field(default_factory=list)
+    lane: int = 0
+    origin_x: int = 0
+    origin_y: int = 0
+
+    @property
+    def width(self) -> float:
+        return self.expanded_max_x - self.expanded_min_x
+
+    @property
+    def height(self) -> float:
+        return self.expanded_max_y - self.expanded_min_y
+
+    def debug_dict(self) -> dict[str, object]:
+        return {
+            "group_id": self.group_id,
+            "pattern_type": self.pattern_type.value,
+            "component_refs": self.component_refs,
+            "local_positions": {ref: placement.model_dump(mode="json") for ref, placement in self.local_placements.items()},
+            "oriented_bounds": {ref: bounds.__dict__ for ref, bounds in self.oriented_bounds.items()},
+            "body_union": {"min_x": self.body_min_x, "min_y": self.body_min_y, "max_x": self.body_max_x, "max_y": self.body_max_y},
+            "margins": {"left": self.margin_left, "right": self.margin_right, "top": self.margin_top, "bottom": self.margin_bottom},
+            "expanded_envelope": {"min_x": self.expanded_min_x, "min_y": self.expanded_min_y, "max_x": self.expanded_max_x, "max_y": self.expanded_max_y, "width": self.width, "height": self.height},
+            "lane": self.lane,
+            "origin": {"x": self.origin_x, "y": self.origin_y},
+            "fallback_geometry_refs": self.fallback_refs,
+        }
 
 
 GROUP_CLEARANCE_X = 120
@@ -45,6 +86,23 @@ GROUP_CLEARANCE_Y = 120
 PIN_ESCAPE_ALLOWANCE = 100
 TEXT_CLEARANCE_ALLOWANCE = 60
 POWER_SYMBOL_CLEARANCE = 90
+FALLBACK_COMPONENT_WIDTH = 180
+FALLBACK_COMPONENT_HEIGHT = 120
+
+
+def get_oriented_component_bounds(
+    component: ComponentInstance | None,
+    x: int,
+    y: int,
+    orientation: int,
+    library: ComponentLibrary,
+) -> Bounds:
+    definition = library.get(component.component_id) if component else None
+    placement = Placement(x=x, y=y, rotation=orientation)
+    if not definition or definition.body.width <= 0 or definition.body.height <= 0:
+        return Bounds(x, y, x + FALLBACK_COMPONENT_WIDTH, y + FALLBACK_COMPONENT_HEIGHT)
+    width, height = component_size(definition, placement)
+    return Bounds(x, y, x + width, y + height)
 
 
 @dataclass
@@ -56,6 +114,8 @@ class DeterministicPlacementEngine:
     def place(self, circuit: Circuit, library: ComponentLibrary, existing: Layout | None = None) -> Layout:
         layout = existing.model_copy(deep=True) if existing else Layout()
         self._existing_refs = set(layout.components)
+        self._instances_by_ref = {component.ref: component for component in circuit.components}
+        self.last_group_envelopes: list[dict[str, object]] = []
         layout.canvas["grid"] = self.grid
         analysis = TopologyAnalyzer().analyze(circuit, library)
         self._place_by_role(circuit, library, layout, analysis)
@@ -63,6 +123,7 @@ class DeterministicPlacementEngine:
         self._choose_two_pin_orientations(circuit, layout, analysis)
         self._fill_unplaced(circuit, library, layout, analysis)
         self._resize_canvas(circuit, library, layout)
+        layout.canvas["functional_groups"] = self.last_group_envelopes
         return layout
 
     def _place_by_role(self, circuit: Circuit, library: ComponentLibrary, layout: Layout, analysis: TopologyAnalysis) -> None:
@@ -90,105 +151,99 @@ class DeterministicPlacementEngine:
 
     def _place_patterns(self, circuit: Circuit, library: ComponentLibrary, layout: Layout, analysis: TopologyAnalysis) -> None:
         low_side_refs = self._refs_in_patterns(analysis, PatternType.LOW_SIDE_MOSFET_SWITCH)
-        self._place_led_current_limits(circuit, layout, analysis, low_side_refs)
-        self._place_gate_resistors(layout, analysis, low_side_refs)
+        self._place_led_current_limits(circuit, library, layout, analysis, low_side_refs)
+        self._place_gate_resistors(library, layout, analysis, low_side_refs)
         self._place_low_side_switches(circuit, library, layout, analysis)
-        self._place_voltage_dividers(circuit, layout, analysis)
+        self._place_voltage_dividers(circuit, library, layout, analysis)
         self._place_pull_resistors(layout, analysis)
         self._place_decoupling(circuit, library, layout, analysis)
-        self._place_rc_filters(layout, analysis)
+        self._place_rc_filters(library, layout, analysis)
 
-    def _place_led_current_limits(self, circuit: Circuit, layout: Layout, analysis: TopologyAnalysis, low_side_refs: set[str]) -> None:
+    def _place_led_current_limits(self, circuit: Circuit, library: ComponentLibrary, layout: Layout, analysis: TopologyAnalysis, low_side_refs: set[str]) -> None:
         lane_y = 320
-        for pattern in self._strong_patterns(analysis, PatternType.LED_CURRENT_LIMIT):
+        for lane, pattern in enumerate(self._strong_patterns(analysis, PatternType.LED_CURRENT_LIMIT)):
             resistor = pattern.metadata.get("resistor")
             led = pattern.metadata.get("led")
             if isinstance(resistor, str) and resistor in low_side_refs:
                 continue
             if isinstance(led, str) and led in low_side_refs:
                 continue
-            bounds = self._pattern_bounds(pattern, width=640, height=260)
-            y = lane_y + int(bounds.routing_margin_top)
-            lane_y = self._snap(int(lane_y + bounds.height + GROUP_CLEARANCE_Y))
-            switch_y = y + 100
             shared_net = str(pattern.metadata.get("shared_net", ""))
             led_left = self._led_pin_net(circuit, led, "A") == shared_net if isinstance(led, str) else True
+            local = self._led_limit_local_placements(library, resistor if isinstance(resistor, str) else None, led if isinstance(led, str) else None, led_left)
+            envelope = self._build_envelope(pattern, library, local, margin_left=120, margin_right=160, margin_top=180, margin_bottom=180, lane=lane, origin_x=760, origin_y=lane_y)
+            self._place_envelope(layout, envelope, 760, lane_y)
+            lane_y = self._snap(int(lane_y + envelope.height + GROUP_CLEARANCE_Y))
             if led_left:
-                if isinstance(resistor, str):
-                    self._set(layout, resistor, 760, y, 0)
-                if isinstance(led, str):
-                    self._set(layout, led, 960, y, 0)
+                pass
             else:
-                if isinstance(led, str):
-                    self._set(layout, led, 760, y, 0)
-                if isinstance(resistor, str):
-                    self._set(layout, resistor, 1040, y, 0)
+                pass
             for switch_ref in self._switches_on_nets(circuit, set(pattern.net_names)):
-                self._set(layout, switch_ref, 1160, switch_y, 0)
+                self._set(layout, switch_ref, envelope.origin_x + int(envelope.body_max_x) + 160, envelope.origin_y + int(envelope.body_min_y) + 100, 0)
 
-    def _place_gate_resistors(self, layout: Layout, analysis: TopologyAnalysis, low_side_refs: set[str]) -> None:
+    def _place_gate_resistors(self, library: ComponentLibrary, layout: Layout, analysis: TopologyAnalysis, low_side_refs: set[str]) -> None:
         lane_y = 400
-        for pattern in self._strong_patterns(analysis, PatternType.SERIES_GATE_RESISTOR):
+        for lane, pattern in enumerate(self._strong_patterns(analysis, PatternType.SERIES_GATE_RESISTOR)):
             driver = pattern.metadata.get("driver_component")
             resistor = pattern.metadata.get("gate_resistor")
             mosfet = pattern.metadata.get("mosfet")
             if isinstance(mosfet, str) and mosfet in low_side_refs:
                 continue
-            bounds = self._pattern_bounds(pattern, width=780, height=300)
-            y = lane_y + int(bounds.routing_margin_top)
-            lane_y = self._snap(int(lane_y + bounds.height + GROUP_CLEARANCE_Y))
-            if isinstance(driver, str):
-                self._set(layout, driver, 520, y, 0)
-            if isinstance(resistor, str):
-                self._set(layout, resistor, 960, y + 120, 0)
-            if isinstance(mosfet, str):
-                self._set(layout, mosfet, 1160, y, 0)
+            local = self._gate_resistor_local_placements(library, driver if isinstance(driver, str) else None, resistor if isinstance(resistor, str) else None, mosfet if isinstance(mosfet, str) else None)
+            envelope = self._build_envelope(pattern, library, local, margin_left=160, margin_right=180, margin_top=180, margin_bottom=180, lane=lane, origin_x=520, origin_y=lane_y)
+            self._place_envelope(layout, envelope, 520, lane_y)
+            lane_y = self._snap(int(lane_y + envelope.height + GROUP_CLEARANCE_Y))
 
     def _place_low_side_switches(self, circuit: Circuit, library: ComponentLibrary, layout: Layout, analysis: TopologyAnalysis) -> None:
         lane_y = 260
-        for pattern in self._strong_patterns(analysis, PatternType.LOW_SIDE_MOSFET_SWITCH):
-            bounds = self._low_side_bounds(pattern)
-            y = lane_y + int(bounds.routing_margin_top)
-            lane_y = self._snap(int(lane_y + bounds.height + GROUP_CLEARANCE_Y))
+        for lane, pattern in enumerate(self._strong_patterns(analysis, PatternType.LOW_SIDE_MOSFET_SWITCH)):
             mosfet = str(pattern.metadata.get("mosfet", ""))
             if not mosfet:
                 continue
             locked_mosfet = layout.components.get(mosfet) if self._is_locked(layout, mosfet) else None
-            mosfet_x = locked_mosfet.x if locked_mosfet else 1220
-            mosfet_y = locked_mosfet.y if locked_mosfet else y + 240
-            if not locked_mosfet:
-                self._set(layout, mosfet, mosfet_x, mosfet_y, 0)
             gate_resistor = pattern.metadata.get("gate_resistor")
-            if isinstance(gate_resistor, str):
-                self._set(layout, gate_resistor, mosfet_x - 320, mosfet_y, 0)
             pull_down = pattern.metadata.get("pull_down")
-            if isinstance(pull_down, str):
-                self._set(layout, pull_down, mosfet_x - 220, mosfet_y + 180, 90)
             load_pattern = pattern.metadata.get("load_pattern")
+            load_resistor = None
+            led = None
             if isinstance(load_pattern, dict):
-                resistor = load_pattern.get("metadata", {}).get("resistor")
+                load_resistor = load_pattern.get("metadata", {}).get("resistor")
                 led = load_pattern.get("metadata", {}).get("led")
-                if isinstance(resistor, str):
-                    self._set(layout, resistor, mosfet_x - 380, mosfet_y - 280, 0)
-                if isinstance(led, str):
-                    self._set(layout, led, mosfet_x - 160, mosfet_y - 280, 0)
+            local = self._low_side_local_placements(
+                library,
+                mosfet,
+                gate_resistor if isinstance(gate_resistor, str) else None,
+                pull_down if isinstance(pull_down, str) else None,
+                load_resistor if isinstance(load_resistor, str) else None,
+                led if isinstance(led, str) else None,
+            )
             driver = next((ref for ref in pattern.component_refs if analysis.component_roles.get(ref) == ComponentRole.CONTROLLER), None)
+            origin_x = 760
+            if driver:
+                driver_width, _ = self._component_dimensions(library, driver, 0)
+                origin_x = max(origin_x, 560 + driver_width + 120)
+            envelope = self._build_envelope(pattern, library, local, margin_left=180, margin_right=220, margin_top=180, margin_bottom=220, lane=lane, origin_x=origin_x, origin_y=lane_y)
+            if locked_mosfet:
+                mosfet_local = envelope.local_placements.get(mosfet, Placement(x=0, y=0))
+                origin_x = locked_mosfet.x - mosfet_local.x
+                origin_y = locked_mosfet.y - mosfet_local.y
+            else:
+                origin_y = lane_y
+            self._place_envelope(layout, envelope, origin_x, origin_y)
+            lane_y = self._snap(int(lane_y + envelope.height + GROUP_CLEARANCE_Y))
             if driver:
                 self._set(layout, driver, 560, 420, 0)
 
-    def _place_voltage_dividers(self, circuit: Circuit, layout: Layout, analysis: TopologyAnalysis) -> None:
+    def _place_voltage_dividers(self, circuit: Circuit, library: ComponentLibrary, layout: Layout, analysis: TopologyAnalysis) -> None:
         patterns = self._strong_patterns(analysis, PatternType.VOLTAGE_DIVIDER)
-        lane_x = 1320
-        for pattern in patterns:
-            bounds = self._pattern_bounds(pattern, width=120, height=420, margin_x=80, margin_y=80)
-            x = lane_x + int(bounds.routing_margin_left)
-            lane_x = self._snap(int(lane_x + bounds.width + GROUP_CLEARANCE_X))
+        lane_x = 1880
+        for lane, pattern in enumerate(patterns):
             top = pattern.metadata.get("top_resistor")
             bottom = pattern.metadata.get("bottom_resistor")
-            if isinstance(top, str):
-                self._set(layout, top, x, 720, 90)
-            if isinstance(bottom, str):
-                self._set(layout, bottom, x, 960, 90)
+            local = self._divider_local_placements(library, top if isinstance(top, str) else None, bottom if isinstance(bottom, str) else None)
+            envelope = self._build_envelope(pattern, library, local, margin_left=100, margin_right=120, margin_top=120, margin_bottom=140, lane=lane, origin_x=lane_x, origin_y=620)
+            self._place_envelope(layout, envelope, lane_x, 620)
+            lane_x = self._snap(int(lane_x + envelope.width + GROUP_CLEARANCE_X))
 
     def _place_pull_resistors(self, layout: Layout, analysis: TopologyAnalysis) -> None:
         low_side_pull_refs = {
@@ -212,6 +267,7 @@ class DeterministicPlacementEngine:
 
     def _place_decoupling(self, circuit: Circuit, library: ComponentLibrary, layout: Layout, analysis: TopologyAnalysis) -> None:
         target_slots: dict[str, int] = {}
+        target_offsets: dict[str, int] = {}
         fallback_slot = 0
         for pattern in self._strong_patterns(analysis, PatternType.DECOUPLING_CAPACITOR):
             capacitor = pattern.metadata.get("capacitor")
@@ -221,32 +277,30 @@ class DeterministicPlacementEngine:
             if isinstance(target, str) and target in layout.components:
                 slot = target_slots.get(target, 0)
                 target_slots[target] = slot + 1
+                offset = target_offsets.get(target, 0)
                 target_placement = layout.components[target]
                 target_instance = next((component for component in circuit.components if component.ref == target), None)
                 target_definition = library.get(target_instance.component_id) if target_instance else None
                 target_height = component_size(target_definition, target_placement)[1] if target_definition else 160
-                self._set(layout, capacitor, target_placement.x - 240 + slot * 220, target_placement.y + target_height + 180, 90)
+                cap_width, _ = self._component_dimensions(library, capacitor, 90)
+                self._set(layout, capacitor, target_placement.x - 240 + offset, target_placement.y + target_height + 180, 90)
+                target_offsets[target] = offset + cap_width + 140
             else:
                 fallback_slot += 1
                 placement = layout.components.get(capacitor)
                 if placement and not placement.locked and capacitor not in getattr(self, "_existing_refs", set()):
                     self._set(layout, capacitor, placement.x + fallback_slot * 140, placement.y, 90)
-        self._place_bulk_capacitors(layout, analysis, target_slots)
+        self._place_bulk_capacitors(library, layout, analysis, target_slots)
 
-    def _place_rc_filters(self, layout: Layout, analysis: TopologyAnalysis) -> None:
+    def _place_rc_filters(self, library: ComponentLibrary, layout: Layout, analysis: TopologyAnalysis) -> None:
         lane_y = 520
-        for pattern in self._strong_patterns(analysis, PatternType.RC_LOWPASS):
-            bounds = self._pattern_bounds(pattern, width=520, height=260)
-            default = Placement(x=1000, y=lane_y + int(bounds.routing_margin_top))
-            lane_y = self._snap(int(lane_y + bounds.height + GROUP_CLEARANCE_Y))
+        for lane, pattern in enumerate(self._strong_patterns(analysis, PatternType.RC_LOWPASS)):
             resistor = pattern.metadata.get("resistor")
             capacitor = pattern.metadata.get("capacitor")
-            if isinstance(resistor, str):
-                placement = layout.components.get(resistor, default)
-                self._set(layout, resistor, placement.x, default.y, 0)
-            if isinstance(capacitor, str):
-                base = layout.components.get(resistor, default) if isinstance(resistor, str) else default
-                self._set(layout, capacitor, base.x + 220, base.y + 160, 90)
+            local = self._rc_filter_local_placements(library, resistor if isinstance(resistor, str) else None, capacitor if isinstance(capacitor, str) else None)
+            envelope = self._build_envelope(pattern, library, local, margin_left=140, margin_right=160, margin_top=180, margin_bottom=220, lane=lane, origin_x=800, origin_y=lane_y)
+            self._place_envelope(layout, envelope, 800, lane_y)
+            lane_y = self._snap(int(lane_y + envelope.height + GROUP_CLEARANCE_Y))
 
     def _choose_two_pin_orientations(self, circuit: Circuit, layout: Layout, analysis: TopologyAnalysis) -> None:
         orientation_by_ref: dict[str, int] = {}
@@ -323,46 +377,168 @@ class DeterministicPlacementEngine:
             if isinstance(ref, str)
         }
 
-    def _pattern_bounds(
+    def _build_envelope(
         self,
         pattern: TopologyPattern,
-        width: int,
-        height: int,
-        margin_x: int = PIN_ESCAPE_ALLOWANCE,
-        margin_y: int = PIN_ESCAPE_ALLOWANCE + TEXT_CLEARANCE_ALLOWANCE + POWER_SYMBOL_CLEARANCE,
-    ) -> FunctionalGroupBounds:
-        return FunctionalGroupBounds(
-            group_id=":".join(pattern.component_refs),
+        library: ComponentLibrary,
+        local_placements: dict[str, Placement],
+        *,
+        margin_left: int,
+        margin_right: int,
+        margin_top: int,
+        margin_bottom: int,
+        lane: int,
+        origin_x: int,
+        origin_y: int,
+    ) -> FunctionalGroupEnvelope:
+        oriented: dict[str, Bounds] = {}
+        fallback_refs: list[str] = []
+        for ref, placement in local_placements.items():
+            instance = getattr(self, "_instances_by_ref", {}).get(ref)
+            definition = library.get(instance.component_id) if instance else None
+            if not definition or definition.body.width <= 0 or definition.body.height <= 0:
+                fallback_refs.append(ref)
+            oriented[ref] = get_oriented_component_bounds(instance, placement.x, placement.y, placement.rotation, library)
+        if not oriented:
+            oriented["_fallback"] = Bounds(0, 0, FALLBACK_COMPONENT_WIDTH, FALLBACK_COMPONENT_HEIGHT)
+            fallback_refs.append("_fallback")
+        body_min_x = min(bounds.min_x for bounds in oriented.values())
+        body_min_y = min(bounds.min_y for bounds in oriented.values())
+        body_max_x = max(bounds.max_x for bounds in oriented.values())
+        body_max_y = max(bounds.max_y for bounds in oriented.values())
+        expanded_min_x = body_min_x - margin_left
+        expanded_min_y = body_min_y - margin_top
+        expanded_max_x = body_max_x + margin_right
+        expanded_max_y = body_max_y + margin_bottom
+        normalized_placements = {
+            ref: Placement(x=self._snap(int(placement.x - expanded_min_x)), y=self._snap(int(placement.y - expanded_min_y)), rotation=placement.rotation)
+            for ref, placement in local_placements.items()
+        }
+        normalized_bounds = {
+            ref: Bounds(bounds.min_x - expanded_min_x, bounds.min_y - expanded_min_y, bounds.max_x - expanded_min_x, bounds.max_y - expanded_min_y)
+            for ref, bounds in oriented.items()
+        }
+        return FunctionalGroupEnvelope(
+            group_id=str(pattern.metadata.get("mosfet") or ":".join(local_placements) or ":".join(pattern.component_refs)),
             pattern_type=pattern.pattern_type,
-            component_refs=[ref for ref in pattern.component_refs if isinstance(ref, str)],
-            min_x=0,
-            min_y=0,
-            max_x=width,
-            max_y=height,
-            routing_margin_left=margin_x,
-            routing_margin_right=margin_x,
-            routing_margin_top=margin_y,
-            routing_margin_bottom=margin_y,
+            component_refs=sorted(local_placements),
+            body_min_x=body_min_x - expanded_min_x,
+            body_min_y=body_min_y - expanded_min_y,
+            body_max_x=body_max_x - expanded_min_x,
+            body_max_y=body_max_y - expanded_min_y,
+            expanded_min_x=0,
+            expanded_min_y=0,
+            expanded_max_x=expanded_max_x - expanded_min_x,
+            expanded_max_y=expanded_max_y - expanded_min_y,
+            margin_left=margin_left,
+            margin_right=margin_right,
+            margin_top=margin_top,
+            margin_bottom=margin_bottom,
+            local_placements=normalized_placements,
+            oriented_bounds=normalized_bounds,
+            fallback_refs=fallback_refs,
+            lane=lane,
+            origin_x=self._snap(origin_x),
+            origin_y=self._snap(origin_y),
         )
 
-    def _low_side_bounds(self, pattern: TopologyPattern) -> FunctionalGroupBounds:
-        return FunctionalGroupBounds(
-            group_id=str(pattern.metadata.get("mosfet", ":".join(pattern.component_refs))),
-            pattern_type=PatternType.LOW_SIDE_MOSFET_SWITCH,
-            component_refs=[ref for ref in pattern.component_refs if isinstance(ref, str)],
-            min_x=0,
-            min_y=0,
-            max_x=720,
-            max_y=460,
-            routing_margin_left=160,
-            routing_margin_right=180,
-            routing_margin_top=170,
-            routing_margin_bottom=180,
-        )
+    def _place_envelope(self, layout: Layout, envelope: FunctionalGroupEnvelope, origin_x: int, origin_y: int) -> None:
+        envelope.origin_x = self._snap(origin_x)
+        envelope.origin_y = self._snap(origin_y)
+        self.last_group_envelopes.append(envelope.debug_dict())
+        for ref, placement in envelope.local_placements.items():
+            self._set(layout, ref, envelope.origin_x + placement.x, envelope.origin_y + placement.y, placement.rotation)
 
-    def _place_bulk_capacitors(self, layout: Layout, analysis: TopologyAnalysis, target_slots: dict[str, int]) -> None:
+    def _component_dimensions(self, library: ComponentLibrary, ref: str, rotation: int) -> tuple[int, int]:
+        instance = getattr(self, "_instances_by_ref", {}).get(ref)
+        definition = library.get(instance.component_id) if instance else None
+        if not definition or definition.body.width <= 0 or definition.body.height <= 0:
+            return (FALLBACK_COMPONENT_WIDTH, FALLBACK_COMPONENT_HEIGHT)
+        return component_size(definition, Placement(x=0, y=0, rotation=rotation))
+
+    def _led_limit_local_placements(self, library: ComponentLibrary, resistor: str | None, led: str | None, led_left: bool) -> dict[str, Placement]:
+        local: dict[str, Placement] = {}
+        resistor_w, _ = self._component_dimensions(library, resistor, 0) if resistor else (140, 80)
+        led_w, _ = self._component_dimensions(library, led, 0) if led else (140, 100)
+        if led_left:
+            if resistor:
+                local[resistor] = Placement(x=0, y=0, rotation=0)
+            if led:
+                local[led] = Placement(x=resistor_w + 120, y=0, rotation=0)
+        else:
+            if led:
+                local[led] = Placement(x=0, y=0, rotation=0)
+            if resistor:
+                local[resistor] = Placement(x=led_w + 120, y=0, rotation=0)
+        return local
+
+    def _gate_resistor_local_placements(self, library: ComponentLibrary, driver: str | None, resistor: str | None, mosfet: str | None) -> dict[str, Placement]:
+        local: dict[str, Placement] = {}
+        driver_w, _ = self._component_dimensions(library, driver, 0) if driver else (160, 200)
+        resistor_w, _ = self._component_dimensions(library, resistor, 0) if resistor else (140, 80)
+        if driver:
+            local[driver] = Placement(x=0, y=0, rotation=0)
+        if resistor:
+            local[resistor] = Placement(x=driver_w + 260, y=120, rotation=0)
+        if mosfet:
+            local[mosfet] = Placement(x=driver_w + resistor_w + 420, y=0, rotation=0)
+        return local
+
+    def _low_side_local_placements(
+        self,
+        library: ComponentLibrary,
+        mosfet: str,
+        gate_resistor: str | None,
+        pull_down: str | None,
+        load_resistor: str | None,
+        led: str | None,
+    ) -> dict[str, Placement]:
+        local: dict[str, Placement] = {}
+        load_w, load_h = self._component_dimensions(library, load_resistor, 0) if load_resistor else (140, 80)
+        led_w, led_h = self._component_dimensions(library, led, 0) if led else (140, 100)
+        gate_w, gate_h = self._component_dimensions(library, gate_resistor, 0) if gate_resistor else (140, 80)
+        mos_w, mos_h = self._component_dimensions(library, mosfet, 0)
+        pull_w, _ = self._component_dimensions(library, pull_down, 90) if pull_down else (80, 140)
+        load_gap = 120
+        branch_to_switch_gap = 180
+        gate_gap = 180
+        mos_x = max(load_w + load_gap + led_w + branch_to_switch_gap, gate_w + gate_gap)
+        branch_y = 0
+        mos_y = max(load_h, led_h) + 160
+        if load_resistor:
+            local[load_resistor] = Placement(x=0, y=branch_y, rotation=0)
+        if led:
+            local[led] = Placement(x=load_w + load_gap, y=branch_y, rotation=0)
+        local[mosfet] = Placement(x=mos_x, y=mos_y, rotation=0)
+        if gate_resistor:
+            local[gate_resistor] = Placement(x=mos_x - gate_w - gate_gap, y=mos_y, rotation=0)
+        if pull_down:
+            pull_x = max(0, mos_x - gate_gap + (gate_w - pull_w) // 2)
+            local[pull_down] = Placement(x=pull_x, y=mos_y + mos_h + 120, rotation=90)
+        return local
+
+    def _divider_local_placements(self, library: ComponentLibrary, top: str | None, bottom: str | None) -> dict[str, Placement]:
+        local: dict[str, Placement] = {}
+        _, top_h = self._component_dimensions(library, top, 90) if top else (80, 140)
+        if top:
+            local[top] = Placement(x=0, y=0, rotation=90)
+        if bottom:
+            local[bottom] = Placement(x=0, y=top_h + 140, rotation=90)
+        return local
+
+    def _rc_filter_local_placements(self, library: ComponentLibrary, resistor: str | None, capacitor: str | None) -> dict[str, Placement]:
+        local: dict[str, Placement] = {}
+        resistor_w, resistor_h = self._component_dimensions(library, resistor, 0) if resistor else (140, 80)
+        if resistor:
+            local[resistor] = Placement(x=0, y=0, rotation=0)
+        if capacitor:
+            local[capacitor] = Placement(x=resistor_w + 160, y=resistor_h + 140, rotation=90)
+        return local
+
+    def _place_bulk_capacitors(self, library: ComponentLibrary, layout: Layout, analysis: TopologyAnalysis, target_slots: dict[str, int]) -> None:
         role_rank = {"bulk": 0, "reservoir": 1, "unknown_power_shunt": 2}
         bulk_slots: dict[str, int] = {}
+        bulk_offsets: dict[str, int] = {}
         refs = [
             ref
             for ref, metadata in sorted(analysis.capacitor_role_metadata.items(), key=lambda item: (role_rank.get(str(item[1].get("role")), 9), item[0]))
@@ -376,8 +552,11 @@ class DeterministicPlacementEngine:
             if isinstance(target, str) and target in layout.components:
                 slot = bulk_slots.get(target, 0)
                 bulk_slots[target] = slot + 1
+                offset = bulk_offsets.get(target, 0)
                 target_placement = layout.components[target]
-                self._set(layout, ref, target_placement.x - 520 + slot * 220, target_placement.y + 780, 90)
+                cap_width, _ = self._component_dimensions(library, ref, 90)
+                self._set(layout, ref, target_placement.x - 520 + offset, target_placement.y + 1100, 90)
+                bulk_offsets[target] = offset + cap_width + 140
             else:
                 self._set(layout, ref, 300 + index * 160, 520, 90)
 
