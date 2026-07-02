@@ -18,6 +18,7 @@ from .placement import DeterministicPlacementEngine
 from .regression import compare_diagnostic_codes, detect_patterns, engineering_calculations, visual_drc
 from .renderer import render_circuit
 from .router import ManhattanRouter
+from .scene_builder import build_schematic_scene
 from .topology import TopologyAnalyzer
 from .validator import CircuitValidator, has_blocking_diagnostics
 
@@ -305,6 +306,34 @@ def render_error_svg(diagnostics: list[Diagnostic]) -> str:
     return f'<svg id="schematic" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 700"><rect width="1200" height="700" fill="#111821"/>{lines}</svg>'
 
 
+def current_scene_payload() -> dict[str, Any]:
+    lib = library()
+    parser = NetlistParser()
+    source_text = CURRENT_STATE.source_text or (EXAMPLE_NETLIST.read_text(encoding="utf-8") if EXAMPLE_NETLIST.exists() else "")
+    source_filename = CURRENT_STATE.source_filename or str(EXAMPLE_NETLIST)
+    circuit, diagnostics = parser.parse_text(source_text, Path(source_filename))
+    if circuit is None:
+        return {"scene": None, "diagnostics": [diag.model_dump(mode="json") for diag in diagnostics]}
+    validation = CircuitValidator(lib).validate(circuit)
+    diagnostics.extend(validation)
+    if has_blocking_diagnostics(diagnostics):
+        return {"scene": None, "diagnostics": [diag.model_dump(mode="json") for diag in diagnostics]}
+    diagnostics.extend(ElectricalRuleChecker(lib).check(circuit))
+    existing_layout = parse_layout_text(CURRENT_STATE.layout_text)
+    layout = DeterministicPlacementEngine().place(circuit, lib, existing_layout)
+    routes = ManhattanRouter().route(circuit, lib, layout)
+    for route in routes:
+        for warning in route.warnings:
+            diagnostics.append(Diagnostic(severity=Severity.WARNING, message=warning))
+    scene = build_schematic_scene(circuit, lib, layout, routes)
+    return {
+        "scene": scene.model_dump(mode="json"),
+        "diagnostics": [diag.model_dump(mode="json") for diag in diagnostics],
+        "layout": layout.model_dump(mode="json"),
+        "route_count": len(routes),
+    }
+
+
 @app.get("/", response_class=HTMLResponse)
 def index() -> str:
     return (STATIC_ROOT / "index.html").read_text(encoding="utf-8")
@@ -431,6 +460,11 @@ def current_topology() -> dict[str, Any]:
         return {"diagnostics": [diag.model_dump() for diag in diagnostics], "topology": None}
     analysis = TopologyAnalyzer().analyze(circuit, lib)
     return {"diagnostics": [diag.model_dump() for diag in diagnostics], "topology": analysis.model_dump(mode="json")}
+
+
+@app.get("/api/circuit/scene")
+def current_scene() -> dict[str, Any]:
+    return current_scene_payload()
 
 
 @app.post("/api/layout/save")

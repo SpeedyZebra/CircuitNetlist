@@ -13,7 +13,7 @@ from .geometry import (
     segments_collinear_overlap,
     symbol_box,
 )
-from .models import Circuit, ComponentDefinition, Diagnostic, Layout, Placement, RoutedNet, Severity
+from .models import Circuit, ComponentDefinition, Diagnostic, Layout, Placement, RoutedNet
 
 
 RendererFn = Callable[[str, ComponentDefinition, Placement], str]
@@ -47,33 +47,11 @@ class RendererRegistry:
 
 
 def render_circuit(circuit: Circuit, library: ComponentLibrary, layout: Layout, routes: list[RoutedNet], diagnostics: list[Diagnostic]) -> str:
-    registry = default_registry()
-    width = int(layout.canvas.get("width", 1300))
-    height = int(layout.canvas.get("height", 900))
-    context = LabelPlacementContext(circuit, library, layout, routes)
-    parts = [
-        f'<svg id="schematic" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {width} {height}" data-width="{width}" data-height="{height}">',
-        '<defs><pattern id="grid-pattern" width="20" height="20" patternUnits="userSpaceOnUse"><path d="M 20 0 L 0 0 0 20" fill="none" stroke="#28313f" stroke-width="1"/></pattern></defs>',
-        f'<rect id="grid-background" width="{width}" height="{height}" fill="url(#grid-pattern)"/>',
-        '<g id="wires">',
-    ]
-    for route in routes:
-        parts.append(render_route(route, context))
-    parts.append("</g><g id=\"components\">")
-    for instance in circuit.components:
-        definition = library.get(instance.component_id)
-        placement = layout.components.get(instance.ref)
-        if definition and placement:
-            parts.append(registry.render_component(instance.ref, definition, placement))
-    parts.append("</g>")
-    if diagnostics:
-        parts.append('<g id="diagnostic-markers">')
-        for index, diag in enumerate(diagnostics):
-            if diag.severity in {Severity.ERROR, Severity.FATAL, Severity.WARNING}:
-                parts.append(f'<text x="24" y="{32 + index * 18}" class="svg-diagnostic">{escape(diag.severity.value)}: {escape(diag.message)}</text>')
-        parts.append("</g>")
-    parts.append("</svg>")
-    return "".join(parts)
+    from .scene_builder import build_schematic_scene
+    from .scene_renderer import render_scene_svg
+
+    scene = build_schematic_scene(circuit, library, layout, routes)
+    return render_scene_svg(scene, diagnostics)
 
 
 class LabelPlacementContext:
@@ -676,7 +654,7 @@ def component_label_positions(definition: ComponentDefinition, placement: Placem
     anchors = [local_pin_anchor(definition, pin, placement) for pin in definition.pins]
     uses_top_bottom_pins = bool(anchors) and all(y in {0, height} for _, y in anchors)
     if uses_top_bottom_pins:
-        return -12, 70, "end", -12, 88, "end"
+        return width + 12, 70, "start", width + 12, 88, "start"
     return 0, -10, "start", 0, height + 18, "start"
 
 

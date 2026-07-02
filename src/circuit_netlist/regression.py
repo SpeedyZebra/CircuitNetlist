@@ -14,12 +14,14 @@ import yaml
 from .component_library import load_component_library
 from .erc import ElectricalRuleChecker
 from .exporters import export_svg
-from .geometry import absolute_pin_point, boxes_overlap, component_body_box, inflate_box, segment_crosses_box, segments_collinear_overlap, symbol_box
+from .geometry import boxes_overlap, inflate_box, segment_crosses_box, segments_collinear_overlap
 from .models import Circuit, Diagnostic, EngineeringValue, Layout, Severity
 from .parser import NetlistParser
 from .placement import DeterministicPlacementEngine
-from .renderer import LabelPlacementContext, choose_ground_symbol_attachment, choose_net_label_position, choose_power_symbol_attachment, render_circuit, text_box
+from .renderer import render_circuit
 from .router import ManhattanRouter
+from .scene import SchematicScene
+from .scene_builder import build_schematic_scene
 from .validator import CircuitValidator, has_blocking_diagnostics
 
 
@@ -230,24 +232,32 @@ def extra_regression_checks(circuit: Circuit, library: Any) -> list[Diagnostic]:
 
 
 def visual_drc(circuit: Circuit, library: Any, layout: Layout, routes: Any) -> tuple[list[Diagnostic], dict[str, Any]]:
+    scene = build_schematic_scene(circuit, library, layout, list(routes))
+    return visual_drc_from_scene(scene)
+
+
+def visual_drc_from_scene(scene: SchematicScene) -> tuple[list[Diagnostic], dict[str, Any]]:
     diagnostics: list[Diagnostic] = []
-    body_boxes = []
-    symbol_boxes = []
+    body_boxes: list[tuple[str, tuple[float, float, float, float]]] = []
+    symbol_boxes: list[tuple[str, tuple[float, float, float, float]]] = []
     text_boxes = []
     pin_points: dict[str, set[tuple[int, int]]] = {}
-    for component in circuit.components:
-        definition = library.get(component.component_id)
-        placement = layout.components.get(component.ref)
-        if not definition or not placement:
-            continue
-        body_boxes.append((component.ref, component_body_box(definition, placement)))
-        symbol_boxes.append((component.ref, inflate_box(symbol_box(definition, placement), 10)))
-        pin_points[component.ref] = {absolute_pin_point(definition, placement, pin) for pin in definition.pins}
-        width, height = component_body_box(definition, placement)[2] - placement.x, component_body_box(definition, placement)[3] - placement.y
-        text_boxes.append((component.ref, text_box(component.ref, placement.x, placement.y - 10, "start")))
-        text_boxes.append((component.ref, text_box(definition.name if not definition.part_number else definition.part_number, placement.x, placement.y + height + 18, "start")))
+    physical_text_boxes = []
+    for element in scene.elements:
+        if element.kind == "component_body" and element.component_ref:
+            body_boxes.append((element.component_ref, element.active_collision_bounds().as_tuple()))
+        if element.kind == "component_symbol" and element.component_ref:
+            symbol_boxes.append((element.component_ref, element.active_collision_bounds().as_tuple()))
+        if element.kind == "pin" and element.component_ref:
+            point = _pin_center(element)
+            pin_points.setdefault(element.component_ref, set()).add(point)
+        if element.text and element.metadata.get("drc_wire_text", True):
+            item = (element.component_ref or "", element.text.bounds.as_tuple())
+            text_boxes.append(item)
+            if element.metadata.get("physical_wire_text_drc"):
+                physical_text_boxes.append(item)
 
-    wire_like = wire_like_segments(circuit, library, layout, routes)
+    wire_like = wire_like_segments_from_scene(scene)
     component_overlaps = sum(1 for i, (_, a) in enumerate(body_boxes) for _, b in body_boxes[i + 1 :] if boxes_overlap(a, b))
     wire_symbol_overlaps = 0
     for net, kind, source_ref, segment in wire_like:
@@ -257,7 +267,7 @@ def visual_drc(circuit: Circuit, library: Any, layout: Layout, routes: Any) -> t
             if segment_crosses_box(segment, box):
                 wire_symbol_overlaps += 1
     wire_text_overlaps = sum(1 for _, _, _, segment in wire_like for ref, box in text_boxes if not _segment_touches_component_pin(segment, pin_points.get(ref, set())) and segment_crosses_box(segment, inflate_box(box, 8)))
-    physical_wire_text_overlaps = sum(1 for _, kind, _, segment in wire_like if kind == "wire" for ref, box in text_boxes if not _segment_touches_component_pin(segment, pin_points.get(ref, set())) and segment_crosses_box(segment, inflate_box(box, 8)))
+    physical_wire_text_overlaps = sum(1 for _, kind, _, segment in wire_like if kind == "wire" for ref, box in physical_text_boxes if not _segment_touches_component_pin(segment, pin_points.get(ref, set())) and segment_crosses_box(segment, inflate_box(box, 8)))
     wire_overlaps = sum(1 for i, a in enumerate(wire_like) for b in wire_like[i + 1 :] if a[0] != b[0] and segments_collinear_overlap(a[3], b[3]))
     if component_overlaps:
         diagnostics.append(Diagnostic(severity=Severity.ERROR, code="DRC_COMPONENT_OVERLAP", message=f"{component_overlaps} component body overlaps"))
@@ -275,10 +285,10 @@ def visual_drc(circuit: Circuit, library: Any, layout: Layout, routes: Any) -> t
         "physical_wire_text_overlaps": physical_wire_text_overlaps,
         "unrelated_wire_overlaps": wire_overlaps,
         "total_wire_length": total_wire_length,
-        "physical_wire_segments": sum(len(route.segments) for route in routes),
-        "net_labels": sum(1 for route in routes if route.render_style == "net_label" for _ in route.endpoints),
-        "power_symbols": sum(1 for route in routes if route.render_style == "power_symbol" for _ in route.endpoints),
-        "orientations": {ref: placement.rotation for ref, placement in sorted(layout.components.items())},
+        "physical_wire_segments": sum(1 for _, kind, _, _ in wire_like if kind == "wire"),
+        "net_labels": sum(1 for element in scene.elements if element.kind == "net_label" and element.metadata.get("attachment")),
+        "power_symbols": sum(1 for element in scene.elements if element.kind in {"power_symbol", "ground_symbol"}),
+        "orientations": scene.metadata.get("orientations", {}),
     }
     return diagnostics, metrics
 
@@ -288,34 +298,33 @@ def _segment_touches_component_pin(segment: tuple[int, int, int, int], pins: set
 
 
 def wire_like_segments(circuit: Circuit, library: Any, layout: Layout, routes: Any) -> list[tuple[str, str, str, tuple[int, int, int, int]]]:
-    context = LabelPlacementContext(circuit, library, layout, routes)
+    return wire_like_segments_from_scene(build_schematic_scene(circuit, library, layout, list(routes)))
+
+
+def wire_like_segments_from_scene(scene: SchematicScene) -> list[tuple[str, str, str, tuple[int, int, int, int]]]:
     segments: list[tuple[str, str, str, tuple[int, int, int, int]]] = []
-    for route in routes:
-        for segment in route.segments:
-            segments.append((route.name, "wire", "", segment))
-        if route.render_style == "net_label":
-            for endpoint in route.endpoints:
-                x = int(endpoint["x"])
-                y = int(endpoint["y"])
-                stub_segments, _, _, anchor, text_x, text_y, _ = choose_net_label_position(route.name, x, y, str(endpoint["side"]), context)
-                for segment in stub_segments:
-                    segments.append((route.name, "label-stub", str(endpoint["component_ref"]), segment))
-                    context.reserve_stub(segment)
-                context.reserve_text(route.name, text_x, text_y, anchor)
-        if route.render_style == "power_symbol":
-            for endpoint in route.endpoints:
-                x = int(endpoint["x"])
-                y = int(endpoint["y"])
-                if route.name == "GND":
-                    stub_segments, symbol_x, symbol_y = choose_ground_symbol_attachment(x, y, str(endpoint["side"]), context)
-                    context.reserve_text(route.name, symbol_x, symbol_y + 42, "middle")
-                else:
-                    stub_segments, symbol_x, symbol_y = choose_power_symbol_attachment(route.name, x, y, str(endpoint["side"]), context)
-                    context.reserve_text(route.name, symbol_x, symbol_y - 24, "middle")
-                for segment in stub_segments:
-                    segments.append((route.name, "power-stub", str(endpoint["component_ref"]), segment))
-                    context.reserve_stub(segment)
+    for element in scene.elements:
+        if element.kind not in {"wire", "wire_stub"}:
+            continue
+        segment = element.metadata.get("segment")
+        if not segment or len(segment) != 4:
+            continue
+        segments.append(
+            (
+                element.net_name or "",
+                str(element.metadata.get("wire_kind", "wire")),
+                str(element.metadata.get("source_ref", "")),
+                (int(segment[0]), int(segment[1]), int(segment[2]), int(segment[3])),
+            )
+        )
     return segments
+
+
+def _pin_center(element: Any) -> tuple[int, int]:
+    primitive = element.primitives[0].geometry if element.primitives else {}
+    if "cx" in primitive and "cy" in primitive:
+        return (round(float(primitive["cx"])), round(float(primitive["cy"])))
+    return (round((element.bounds.min_x + element.bounds.max_x) / 2), round((element.bounds.min_y + element.bounds.max_y) / 2))
 
 
 def detect_patterns(circuit: Circuit, library: Any) -> list[dict[str, Any]]:

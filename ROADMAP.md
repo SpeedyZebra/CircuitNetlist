@@ -79,3 +79,26 @@ Still intentionally limited to Milestone 1.3 scope:
 - No renderer rewrite.
 - No router replacement.
 - No global placement optimizer or constraint solver.
+
+## Milestone 2 - canonical schematic scene geometry
+
+Status: complete
+
+Implemented in this branch:
+
+- Typed scene primitives and elements in `scene.py`.
+- `build_schematic_scene` as the shared geometry owner for component bodies, symbol bounds, pin anchors, text bounds, wires, stubs, labels, junctions, and canvas bounds.
+- Scene-backed SVG rendering through `render_scene_svg` while preserving the current SVG ids/classes used by the UI.
+- Scene-backed visual DRC through `visual_drc_from_scene`.
+- Scene hit-testing helpers.
+- `/api/circuit/scene` debug endpoint.
+- `scene_debug` CLI for JSON and scene-derived SVG dumps.
+- Scene-based export helper functions.
+- Regression tests covering scene construction, rendering, DRC delegation, hit testing, app endpoint output, and scene export helpers.
+
+Still intentionally limited to Milestone 2 scope:
+
+- Component internals are still rendered by existing SVG fragment helpers, with canonical geometry recorded alongside them.
+- Browser interaction still primarily uses existing SVG DOM ids/classes.
+- PNG export remains a truthful placeholder until a raster backend is added.
+- Placement and routing consume topology and layout inputs as before; they are not yet driven by scene-level collision solving.
