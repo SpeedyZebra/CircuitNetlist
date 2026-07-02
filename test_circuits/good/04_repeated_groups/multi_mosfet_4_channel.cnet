@@ -1,0 +1,112 @@
+CIRCUIT Multi_MOSFET_4_Channel
+
+COMPONENT V8 POWER_DC_SOURCE voltage=5V
+COMPONENT U22 MCU_ATtiny402_SOIC8
+COMPONENT R3 BASIC_RESISTOR value=220ohm role=current_limit
+COMPONENT D14 LIGHT_LED_RED
+COMPONENT R81 BASIC_RESISTOR value=100ohm role=gate_resistor
+COMPONENT R27 BASIC_RESISTOR value=100kohm role=pulldown
+COMPONENT Q12 BASIC_NMOS role=low_side_switch
+COMPONENT R44 BASIC_RESISTOR value=330ohm role=current_limit
+COMPONENT D31 LIGHT_LED_GREEN
+COMPONENT R6 BASIC_RESISTOR value=100ohm role=gate_resistor
+COMPONENT R19 BASIC_RESISTOR value=100kohm role=pulldown
+COMPONENT Q47 BASIC_NMOS role=low_side_switch
+COMPONENT R52 BASIC_RESISTOR value=470ohm role=current_limit
+COMPONENT D9 LIGHT_LED_BLUE
+COMPONENT R73 BASIC_RESISTOR value=100ohm role=gate_resistor
+COMPONENT R34 BASIC_RESISTOR value=100kohm role=pulldown
+COMPONENT Q5 BASIC_NMOS role=low_side_switch
+COMPONENT R68 BASIC_RESISTOR value=680ohm role=current_limit
+COMPONENT D26 LIGHT_LED_WHITE
+COMPONENT R17 BASIC_RESISTOR value=100ohm role=gate_resistor
+COMPONENT R92 BASIC_RESISTOR value=100kohm role=pulldown
+COMPONENT Q88 BASIC_NMOS role=low_side_switch
+
+NET VCC:
+    V8.POS
+    U22.VDD
+    R3.1
+    R44.1
+    R52.1
+    R68.1
+
+NET A_NODE:
+    R3.2
+    D14.A
+
+NET A_SWITCH:
+    D14.K
+    Q12.D
+
+NET A_CTRL:
+    U22.PA7
+    R81.1
+
+NET A_GATE:
+    R81.2
+    R27.1
+    Q12.G
+
+NET B_NODE:
+    R44.2
+    D31.A
+
+NET B_SWITCH:
+    D31.K
+    Q47.D
+
+NET B_CTRL:
+    U22.PA6
+    R6.1
+
+NET B_GATE:
+    R6.2
+    R19.1
+    Q47.G
+
+NET C_NODE:
+    R52.2
+    D9.A
+
+NET C_SWITCH:
+    D9.K
+    Q5.D
+
+NET C_CTRL:
+    U22.PA1
+    R73.1
+
+NET C_GATE:
+    R73.2
+    R34.1
+    Q5.G
+
+NET D_NODE:
+    R68.2
+    D26.A
+
+NET D_SWITCH:
+    D26.K
+    Q88.D
+
+NET D_CTRL:
+    U22.PA2
+    R17.1
+
+NET D_GATE:
+    R17.2
+    R92.1
+    Q88.G
+
+NET GND:
+    V8.NEG
+    U22.GND
+    R27.2
+    Q12.S
+    R19.2
+    Q47.S
+    R34.2
+    Q5.S
+    R92.2
+    Q88.S

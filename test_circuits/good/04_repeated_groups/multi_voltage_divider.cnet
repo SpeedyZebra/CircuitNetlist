@@ -1,0 +1,48 @@
+CIRCUIT Multi_Voltage_Divider
+
+COMPONENT V8 POWER_DC_SOURCE voltage=5V
+COMPONENT U22 MCU_ATtiny402_SOIC8
+COMPONENT R3 BASIC_RESISTOR value=220kohm role=divider_top
+COMPONENT R81 BASIC_RESISTOR value=100kohm role=divider_bottom
+COMPONENT R27 BASIC_RESISTOR value=330kohm role=divider_top
+COMPONENT R44 BASIC_RESISTOR value=100kohm role=divider_bottom
+COMPONENT R6 BASIC_RESISTOR value=470kohm role=divider_top
+COMPONENT R19 BASIC_RESISTOR value=100kohm role=divider_bottom
+COMPONENT R52 BASIC_RESISTOR value=680kohm role=divider_top
+COMPONENT R73 BASIC_RESISTOR value=100kohm role=divider_bottom
+
+NET VIN:
+    V8.POS
+    U22.VDD
+    R3.1
+    R27.1
+    R6.1
+    R52.1
+
+NET SENSE_A:
+    R3.2
+    R81.1
+    U22.PA6
+
+NET SENSE_B:
+    R27.2
+    R44.1
+    U22.PA7
+
+NET SENSE_C:
+    R6.2
+    R19.1
+    U22.PA1
+
+NET SENSE_D:
+    R52.2
+    R73.1
+    U22.PA2
+
+NET GND:
+    V8.NEG
+    U22.GND
+    R81.2
+    R44.2
+    R19.2
+    R73.2

@@ -256,7 +256,8 @@ def visual_drc(circuit: Circuit, library: Any, layout: Layout, routes: Any) -> t
                 continue
             if segment_crosses_box(segment, box):
                 wire_symbol_overlaps += 1
-    wire_text_overlaps = sum(1 for _, _, _, segment in wire_like for _, box in text_boxes if segment_crosses_box(segment, inflate_box(box, 8)))
+    wire_text_overlaps = sum(1 for _, _, _, segment in wire_like for ref, box in text_boxes if not _segment_touches_component_pin(segment, pin_points.get(ref, set())) and segment_crosses_box(segment, inflate_box(box, 8)))
+    physical_wire_text_overlaps = sum(1 for _, kind, _, segment in wire_like if kind == "wire" for ref, box in text_boxes if not _segment_touches_component_pin(segment, pin_points.get(ref, set())) and segment_crosses_box(segment, inflate_box(box, 8)))
     wire_overlaps = sum(1 for i, a in enumerate(wire_like) for b in wire_like[i + 1 :] if a[0] != b[0] and segments_collinear_overlap(a[3], b[3]))
     if component_overlaps:
         diagnostics.append(Diagnostic(severity=Severity.ERROR, code="DRC_COMPONENT_OVERLAP", message=f"{component_overlaps} component body overlaps"))
@@ -264,11 +265,14 @@ def visual_drc(circuit: Circuit, library: Any, layout: Layout, routes: Any) -> t
         diagnostics.append(Diagnostic(severity=Severity.ERROR, code="DRC_WIRE_SYMBOL_OVERLAP", message=f"{wire_symbol_overlaps} wire/symbol overlaps"))
     if wire_overlaps:
         diagnostics.append(Diagnostic(severity=Severity.WARNING, code="DRC_WIRE_WIRE_OVERLAP", message=f"{wire_overlaps} unrelated wire overlaps"))
+    if physical_wire_text_overlaps:
+        diagnostics.append(Diagnostic(severity=Severity.WARNING, code="DRC_WIRE_TEXT_OVERLAP", message=f"{physical_wire_text_overlaps} physical wire/text overlaps"))
     total_wire_length = sum(abs(x1 - x2) + abs(y1 - y2) for _, _, _, (x1, y1, x2, y2) in wire_like)
     metrics = {
         "component_body_overlaps": component_overlaps,
         "wire_symbol_overlaps": wire_symbol_overlaps,
         "wire_text_overlaps": wire_text_overlaps,
+        "physical_wire_text_overlaps": physical_wire_text_overlaps,
         "unrelated_wire_overlaps": wire_overlaps,
         "total_wire_length": total_wire_length,
         "physical_wire_segments": sum(len(route.segments) for route in routes),
@@ -277,6 +281,10 @@ def visual_drc(circuit: Circuit, library: Any, layout: Layout, routes: Any) -> t
         "orientations": {ref: placement.rotation for ref, placement in sorted(layout.components.items())},
     }
     return diagnostics, metrics
+
+
+def _segment_touches_component_pin(segment: tuple[int, int, int, int], pins: set[tuple[int, int]]) -> bool:
+    return (segment[0], segment[1]) in pins or (segment[2], segment[3]) in pins
 
 
 def wire_like_segments(circuit: Circuit, library: Any, layout: Layout, routes: Any) -> list[tuple[str, str, str, tuple[int, int, int, int]]]:

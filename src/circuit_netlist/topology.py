@@ -97,7 +97,7 @@ class TopologyAnalyzer:
         patterns.extend(detect_led_current_limits(context, power_nets, ground_nets))
         patterns.extend(detect_low_side_mosfet_switches(context, ground_nets, patterns))
         classified = {ref for pattern in patterns for ref in pattern.component_refs}
-        patterns.extend(detect_rc_lowpass(context, ground_nets, classified))
+        patterns.extend(detect_rc_lowpass(context, power_nets, ground_nets, classified))
         patterns.extend(detect_flyback_diodes(context))
         patterns.extend(detect_series_elements(context, ground_nets, classified | pull_resistors | divider_resistors))
         patterns.sort(key=lambda item: (item.pattern_type.value, item.component_refs, item.net_names))
@@ -458,7 +458,7 @@ def detect_low_side_mosfet_switches(context: _TopologyContext, ground_nets: set[
     return result
 
 
-def detect_rc_lowpass(context: _TopologyContext, ground_nets: set[str], excluded_components: set[str]) -> list[TopologyPattern]:
+def detect_rc_lowpass(context: _TopologyContext, power_nets: set[str], ground_nets: set[str], excluded_components: set[str]) -> list[TopologyPattern]:
     patterns: list[TopologyPattern] = []
     for capacitor in context.two_pin_passives():
         definition = context.definition(capacitor.ref)
@@ -466,6 +466,8 @@ def detect_rc_lowpass(context: _TopologyContext, ground_nets: set[str], excluded
             continue
         cap_nets = context.component_nets(capacitor.ref)
         if len(cap_nets) != 2 or not cap_nets & ground_nets:
+            continue
+        if cap_nets & power_nets:
             continue
         output_net = next(iter(cap_nets - ground_nets))
         for resistor in context.two_pin_passives("resistor"):

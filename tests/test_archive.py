@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from tools.create_source_archive import should_include
+from circuit_netlist.source_archive import should_include
 
 
 def test_source_archive_excludes_generated_and_cache_content() -> None:

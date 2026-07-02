@@ -94,11 +94,34 @@ Placement only applies pattern-specific rules when confidence is at least `MIN_P
 - RC low-pass filters keep the resistor horizontal and capacitor vertical.
 - Repeated topology groups allocate deterministic rows or slots instead of stacking at identical coordinates. This covers repeated LED/MOSFET switch channels, multiple decouplers for the same target, repeated dividers, and repeated RC filters.
 
+Milestone 1.2 makes repeated placement dimension-aware without introducing the future canonical scene model. `placement.py` now uses a local `FunctionalGroupBounds` envelope for repeated groups. The envelope includes conservative allowances for oriented component bodies, pin escape distance, text clearance, power/ground symbol clearance, and routing channels. Lane spacing is derived from the previous group's approximate bounds plus `GROUP_CLEARANCE_X` or `GROUP_CLEARANCE_Y`, rather than a single center-to-center offset.
+
+Current repeated-group behavior:
+
+- Low-side MOSFET/LED channels are stacked as complete branch envelopes. The LED current-limit branch sits above the MOSFET drain, the gate resistor aligns with the MOSFET gate, and the pull-down sits below the gate node.
+- Locked MOSFETs are preserved; their associated gate/load/pull-down components are placed around the locked MOSFET instead of silently stacking in the default lane.
+- Voltage dividers get distinct columns sized from divider group bounds.
+- RC filters get distinct rows with additional room for shunt-capacitor label and symbol stubs.
+- Decoupling/bypass capacitors get widened slots near the target. Bulk/reservoir capacitors are placed in a separate rail-bank area so they are not mistaken for small IC decouplers or RC shunts.
+
 ## Regression Integrity
 
 Regression expected-code matching is strict. Unexpected `DRC_`, `ERC_`, `VALIDATION_`, and `PARSE_` diagnostics fail a case unless the case explicitly lists them in `expected_codes` or `allowed_codes`. Duplicate diagnostic counts are compared as multisets so repeated warnings cannot disappear inside sorting.
 
 Visual DRC regressions should be fixed in placement/routing/rendering code rather than hidden by the expected-code file.
+
+## Wire/Text Policy
+
+`visual_drc` records all wire/text intersections in metrics for audit visibility. It emits `DRC_WIRE_TEXT_OVERLAP` only for physical routed wires crossing unrelated component reference/value text.
+
+The current conservative policy intentionally does not warn for:
+
+- Power-symbol stubs and net-label stubs.
+- A wire segment touching text on a component when the segment endpoint is one of that component's own pins.
+- Pin-number proximity, because pin-number text is not yet represented as separate geometry.
+- Intentional net-label connection stubs.
+
+This avoids false positives in vertical dividers and local power-symbol attachments while still catching real unrelated wire/text collisions. A fuller text-geometry model is deferred to Milestone 2.
 
 ## Determinism
 

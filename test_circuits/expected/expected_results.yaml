@@ -21,6 +21,42 @@ circuits:
     render_allowed: true
     expected_components: 4
     expected_nets: [VIN, ADC_SENSE, GND]
+  good/04_repeated_groups/multi_mosfet_2_channel.cnet:
+    parse: pass
+    validation: pass
+    expected_codes: []
+    render_allowed: true
+    expected_components: 12
+  good/04_repeated_groups/multi_mosfet_4_channel.cnet:
+    parse: pass
+    validation: pass
+    expected_codes: []
+    render_allowed: true
+    expected_components: 22
+  good/04_repeated_groups/multi_voltage_divider.cnet:
+    parse: pass
+    validation: pass
+    expected_codes: []
+    render_allowed: true
+    expected_components: 10
+  good/04_repeated_groups/multi_rc_filter.cnet:
+    parse: pass
+    validation: pass
+    expected_codes: []
+    render_allowed: true
+    expected_components: 6
+  good/04_repeated_groups/multi_decoupling.cnet:
+    parse: pass
+    validation: pass
+    expected_codes: []
+    render_allowed: true
+    expected_components: 6
+  good/04_repeated_groups/multi_decoupling_with_rc_filters.cnet:
+    parse: pass
+    validation: pass
+    expected_codes: []
+    render_allowed: true
+    expected_components: 10
 
   faults/01_led_resistor/missing_resistor.cnet:
     parse: pass

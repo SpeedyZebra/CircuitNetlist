@@ -37,3 +37,25 @@ Still intentionally limited to Milestone 1.1 scope:
 - No general-purpose scored placement optimizer.
 - No canonical scene-geometry rewrite.
 - No Milestone 2 architecture changes.
+
+## Milestone 1.2 - robust repeated-group placement and visual-regression coverage
+
+Status: complete
+
+Implemented in this branch:
+
+- Approximate `FunctionalGroupBounds` envelopes local to placement.
+- Dimension-aware repeated-group lane spacing for MOSFET channels, voltage dividers, RC filters, and capacitor banks.
+- Separate bulk/reservoir capacitor rail-bank placement.
+- RC-filter detection guard so power-rail bulk capacitors are not classified as filters.
+- Full-pipeline visual DRC tests for repeated groups.
+- Six repeated-group stress circuits in the real regression manifest.
+- Conservative `DRC_WIRE_TEXT_OVERLAP` policy for physical wire/text collisions.
+- Import-safe source archive helper and local verification script for both pytest invocation styles.
+
+Still intentionally limited to Milestone 1.2 scope:
+
+- No canonical scene model.
+- No renderer rewrite.
+- No router replacement.
+- No general-purpose optimizer or constraint solver.

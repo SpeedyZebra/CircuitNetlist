@@ -13,6 +13,30 @@ cases:
     family: 03_voltage_divider_adc
     type: good
     path: good/03_voltage_divider_adc/circuit.cnet
+  - id: 04_multi_mosfet_2_channel
+    family: 04_repeated_groups
+    type: good
+    path: good/04_repeated_groups/multi_mosfet_2_channel.cnet
+  - id: 04_multi_mosfet_4_channel
+    family: 04_repeated_groups
+    type: good
+    path: good/04_repeated_groups/multi_mosfet_4_channel.cnet
+  - id: 04_multi_voltage_divider
+    family: 04_repeated_groups
+    type: good
+    path: good/04_repeated_groups/multi_voltage_divider.cnet
+  - id: 04_multi_rc_filter
+    family: 04_repeated_groups
+    type: good
+    path: good/04_repeated_groups/multi_rc_filter.cnet
+  - id: 04_multi_decoupling
+    family: 04_repeated_groups
+    type: good
+    path: good/04_repeated_groups/multi_decoupling.cnet
+  - id: 04_multi_decoupling_with_rc_filters
+    family: 04_repeated_groups
+    type: good
+    path: good/04_repeated_groups/multi_decoupling_with_rc_filters.cnet
   - id: 01_led_missing_resistor
     family: 01_led_resistor
     type: fault
