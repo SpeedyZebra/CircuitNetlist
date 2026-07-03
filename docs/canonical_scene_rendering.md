@@ -87,7 +87,7 @@ Component SVG groups include immutable scene placement metadata:
 - `data-placement-x`
 - `data-placement-y`
 
-Browser dragging computes `current_layout - scene_origin`, which keeps repeated drags cumulative even though the underlying SVG primitives remain in scene coordinates. A drag begins only after 5 CSS pixels of movement. Pins, wires, junctions, net labels, and power/ground symbols keep their own selection behavior and do not initiate component drags.
+Browser dragging snapshots the SVG screen CTM inverse at pointer-down, converts CSS-pixel pointer deltas into SVG user-unit deltas, then computes `current_layout - scene_origin`. This keeps first and repeated drags cumulative even though the underlying SVG primitives remain in scene coordinates. A drag begins only after 5 CSS pixels of movement. Pins, wires, junctions, net labels, and power/ground symbols keep their own selection behavior and do not initiate component drags.
 
 Reroute responses include layout, scene, SVG, diagnostics, and nested schematic data. The frontend applies them through the same central `applySchematic` path used by load and reload so scene IDs do not go stale.
 

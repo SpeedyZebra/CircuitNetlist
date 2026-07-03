@@ -89,6 +89,7 @@ Implemented in this branch:
 - Milestone 2A foundation: typed scene model, scene JSON, scene debug CLI, and scene-aware DRC entry point.
 - Milestone 2B authority: production SVG now serializes canonical scene primitives rather than opaque legacy SVG fragments.
 - Milestone 2C presentation cleanup: open schematic symbols use hidden logical bounds without visible body rectangles, while block/package components retain visible bodies.
+- Milestone 2D interaction foundation: Playwright browser tests for real component dragging and first-drag center-flash regression coverage.
 - Typed scene primitives and elements in `scene.py`.
 - `build_schematic_scene` as the shared geometry owner for component bodies, symbol bounds, pin anchors, text bounds, wires, stubs, labels, junctions, and canvas bounds.
 - Structured component symbol primitives in `symbol_geometry.py`.
@@ -98,6 +99,7 @@ Implemented in this branch:
 - Scene hit-testing helpers and `/api/circuit/scene/hit-test`.
 - Browser interaction using scene IDs for component, pin, wire, junction, label, and power/ground symbol ownership.
 - Cumulative browser component dragging from immutable scene origins, with a 5 pixel click-versus-drag threshold and child-element drag blocking.
+- Pointer-down SVG screen CTM snapshots so the first drag and later drags use one coordinate basis.
 - Central frontend scene application for load, reload, local upload, reset, and reroute.
 - Real PNG bytes from scene primitive rasterization with Pillow.
 - `/api/circuit/scene` debug endpoint.
@@ -105,6 +107,7 @@ Implemented in this branch:
 - Scene-based export helper functions.
 - Regression tests covering scene construction, primitive rendering, DRC delegation, hit testing, app endpoint output, scene export helpers, mutation authority, and import boundaries.
 - Symbol-presentation and browser-interaction contract tests.
+- Playwright Chromium tests for battery first-drag path sampling, center-flash detection, repeated cumulative drags, reload-first-drag stability, click threshold behavior, and resistor dragging.
 
 Still intentionally limited to Milestone 2 scope:
 
@@ -112,3 +115,4 @@ Still intentionally limited to Milestone 2 scope:
 - The legacy renderer registry remains for compatibility but is not used by production scene construction.
 - PNG path curves/arcs are approximate in the Pillow raster backend.
 - Browser drag still applies a temporary SVG transform until reroute/reload regenerates the scene, and drag persistence remains tied to the explicit Save Layout action.
+- Playwright tests require Node.js/npm plus a one-time Chromium install and are not part of the Python-only pytest suite.

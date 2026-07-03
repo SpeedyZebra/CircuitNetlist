@@ -150,6 +150,21 @@ pytest
 
 The tests cover component loading, malformed YAML, duplicate IDs, parsing, engineering values, validation, pin aliases, ERC checks, deterministic placement, non-overlap, and stable SVG IDs.
 
+Browser interaction tests use Playwright and launch the real app on a dedicated test port. One-time setup:
+
+```powershell
+npm install
+npx playwright install chromium
+```
+
+Run them with:
+
+```powershell
+npm run test:browser
+```
+
+Headed and debug variants are available through `npm run test:browser:headed` and `npm run test:browser:debug`. See `docs/browser_playwright_testing.md` for details.
+
 ## Regression Suite
 
 The `test_circuits/` tree is a browser-readable schematic validation and regression suite. It currently implements the first vertical slice:

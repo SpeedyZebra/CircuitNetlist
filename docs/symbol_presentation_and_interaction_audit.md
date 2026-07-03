@@ -43,6 +43,6 @@ Milestone 2B made the canonical scene authoritative for rendering, DRC, hit test
 
 ## Remaining Limitations
 
-- Browser interaction tests are static Python contract tests because this environment has no Node or browser test runner installed.
+- Real browser interaction tests now live in `tests/browser/component-drag.spec.js`; they require Node.js, npm, and Playwright's Chromium install.
 - Dragging updates browser layout state and marks it dirty; persistence still happens through the explicit Save Layout button rather than automatic save on pointer-up.
 - PNG path curve rasterization remains approximate, as documented in the canonical scene notes.

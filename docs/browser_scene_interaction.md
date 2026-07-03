@@ -27,13 +27,14 @@ SVG component primitives are emitted in immutable scene coordinates. Each compon
 Those values are the origin used when the current scene was built. During a drag:
 
 ```text
-proposed_layout_x = layout_start_x + pointer_delta_x
-proposed_layout_y = layout_start_y + pointer_delta_y
+svg_delta = pointer_css_delta transformed by the pointer-down SVG screen CTM inverse
+proposed_layout_x = layout_start_x + svg_delta_x
+proposed_layout_y = layout_start_y + svg_delta_y
 visual_translate_x = proposed_layout_x - scene_origin_x
 visual_translate_y = proposed_layout_y - scene_origin_y
 ```
 
-This keeps first, second, third, and later drags cumulative. Reroute or reload replaces the scene, so the returned placement becomes the new immutable origin.
+The pointer-down CTM snapshot keeps a drag in one coordinate basis, including the first drag after page load. This keeps first, second, third, and later drags cumulative. Reroute or reload replaces the scene, so the returned placement becomes the new immutable origin.
 
 Invalid non-finite drag coordinates are rejected and do not commit to layout state.
 
@@ -73,4 +74,6 @@ Dragging updates the browser layout and marks the current layout dirty. The expl
 
 ## Test Approach
 
-The repository currently has no JavaScript or browser test runner installed. `tests/test_browser_interaction_contract.py` pins the critical frontend invariants by inspecting `app.js`: thresholded drag, cumulative transform formula, child-element drag blocking, coherent reroute scene replacement, and save failure behavior.
+`tests/test_browser_interaction_contract.py` pins critical frontend invariants by inspecting `app.js`: thresholded drag, cumulative transform formula, child-element drag blocking, coherent reroute scene replacement, and save failure behavior.
+
+Milestone 2D adds real Chromium coverage in `tests/browser/component-drag.spec.js`. See `docs/browser_playwright_testing.md` for setup and commands.

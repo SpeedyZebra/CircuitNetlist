@@ -25,11 +25,17 @@ def test_component_drag_formula_is_cumulative_from_scene_origin() -> None:
     assert "sceneOriginY" in source
     assert "component.dataset.placementX" in source
     assert "component.dataset.placementY" in source
-    assert "state.drag.layoutStartX + p.x - state.drag.pointerStart.x" in source
-    assert "state.drag.layoutStartY + p.y - state.drag.pointerStart.y" in source
-    assert "translate(${nx - state.drag.sceneOriginX},${ny - state.drag.sceneOriginY})" in source
+    assert "screenCtmInverse(svg)" in source
+    assert "clientDeltaToSvgDelta(evt, state.drag)" in source
+    assert "state.drag.layoutStartX + delta.x" in source
+    assert "state.drag.layoutStartY + delta.y" in source
+    assert "formatNumber(nx - state.drag.sceneOriginX)" in source
+    assert "formatNumber(ny - state.drag.sceneOriginY)" in source
     assert "Number.isFinite(nx)" in source
     assert "Number.isFinite(ny)" in source
+    assert "readTranslate(component)" in source
+    assert "capturePointer(svg, evt.pointerId)" in source
+    assert "releasePointer(state.drag?.captureTarget, state.drag?.pointerId)" in source
 
 
 def test_child_scene_elements_do_not_start_component_drag() -> None:

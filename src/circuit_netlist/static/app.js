@@ -144,6 +144,23 @@ function svgPoint(evt) {
   return pt.matrixTransform(svg.getScreenCTM().inverse());
 }
 
+function screenCtmInverse(svg) {
+  const ctm = svg?.getScreenCTM?.();
+  if (!ctm) return null;
+  const inverse = ctm.inverse();
+  if (![inverse.a, inverse.b, inverse.c, inverse.d].every(Number.isFinite)) return null;
+  return { a: inverse.a, b: inverse.b, c: inverse.c, d: inverse.d };
+}
+
+function clientDeltaToSvgDelta(evt, drag) {
+  const dx = evt.clientX - drag.startClientX;
+  const dy = evt.clientY - drag.startClientY;
+  return {
+    x: dx * drag.clientToSvg.a + dy * drag.clientToSvg.c,
+    y: dx * drag.clientToSvg.b + dy * drag.clientToSvg.d
+  };
+}
+
 function onWheel(evt) {
   evt.preventDefault();
   const svg = document.querySelector("#schematic");
@@ -160,34 +177,50 @@ function onPointerDown(evt) {
   if (evt.button !== undefined && evt.button !== 0) return;
   const sceneTarget = sceneElementForTarget(evt.target);
   const component = draggableComponentForTarget(evt.target, sceneTarget);
+  const svg = document.querySelector("#schematic");
+  const clientToSvg = screenCtmInverse(svg);
+  if (!clientToSvg) {
+    statusEl.textContent = "Drag ignored: SVG coordinate transform is not ready";
+    return;
+  }
   const p = svgPoint(evt);
   if (component) {
     const ref = component.dataset.ref;
-    const placement = state.layout.components[ref];
-    const sceneOriginX = Number(component.dataset.placementX ?? placement.x);
-    const sceneOriginY = Number(component.dataset.placementY ?? placement.y);
+    const placement = state.layout?.components?.[ref] || {};
+    const currentTranslate = readTranslate(component);
+    const sceneOriginX = finiteNumber(component.dataset.placementX, finiteNumber(placement.x, 0) - currentTranslate.x);
+    const sceneOriginY = finiteNumber(component.dataset.placementY, finiteNumber(placement.y, 0) - currentTranslate.y);
+    const layoutStartX = finiteNumber(placement.x, sceneOriginX + currentTranslate.x);
+    const layoutStartY = finiteNumber(placement.y, sceneOriginY + currentTranslate.y);
+    capturePointer(svg, evt.pointerId);
     state.drag = {
       type: "component",
       ref,
       group: component,
+      captureTarget: svg,
       pointerId: evt.pointerId,
       pointerStart: p,
       startClientX: evt.clientX,
       startClientY: evt.clientY,
+      clientToSvg,
       sceneOriginX,
       sceneOriginY,
-      layoutStartX: Number(placement.x),
-      layoutStartY: Number(placement.y),
+      transformStartX: currentTranslate.x,
+      transformStartY: currentTranslate.y,
+      layoutStartX,
+      layoutStartY,
       pending: true,
       active: false,
       moved: false
     };
+    evt.preventDefault();
   } else if (sceneTarget) {
     state.drag = null;
   } else {
-    const svg = document.querySelector("#schematic");
     const vb = svg.viewBox.baseVal;
-    state.drag = { type: "pan", startClientX: evt.clientX, startClientY: evt.clientY, x: vb.x, y: vb.y, w: vb.width, h: vb.height };
+    capturePointer(svg, evt.pointerId);
+    state.drag = { type: "pan", captureTarget: svg, pointerId: evt.pointerId, startClientX: evt.clientX, startClientY: evt.clientY, x: vb.x, y: vb.y, w: vb.width, h: vb.height };
+    evt.preventDefault();
   }
 }
 
@@ -200,18 +233,17 @@ function onPointerMove(evt) {
     vb.y = state.drag.y - (evt.clientY - state.drag.startClientY) * vb.height / svg.clientHeight;
     return;
   }
-  const p = svgPoint(evt);
   if (state.drag.pending) {
     const pixelDistance = Math.hypot(evt.clientX - state.drag.startClientX, evt.clientY - state.drag.startClientY);
     if (pixelDistance < DRAG_THRESHOLD_PX) return;
     state.drag.pending = false;
     state.drag.active = true;
     state.drag.moved = true;
-    state.drag.group.setPointerCapture?.(state.drag.pointerId);
   }
+  const delta = clientDeltaToSvgDelta(evt, state.drag);
   const snap = document.querySelector("#snap-toggle").checked ? (state.layout.canvas.grid || 20) : 1;
-  const nx = Math.round((state.drag.layoutStartX + p.x - state.drag.pointerStart.x) / snap) * snap;
-  const ny = Math.round((state.drag.layoutStartY + p.y - state.drag.pointerStart.y) / snap) * snap;
+  const nx = Math.round((state.drag.layoutStartX + delta.x) / snap) * snap;
+  const ny = Math.round((state.drag.layoutStartY + delta.y) / snap) * snap;
   if (!Number.isFinite(nx) || !Number.isFinite(ny)) {
     statusEl.textContent = `Ignored invalid drag for ${state.drag.ref}`;
     return;
@@ -219,16 +251,16 @@ function onPointerMove(evt) {
   state.layout.components[state.drag.ref] = { ...(state.layout.components[state.drag.ref] || {}), x: nx, y: ny };
   if (state.current) state.current.layout_dirty = true;
   const group = document.querySelector(`#component-${cssSafe(state.drag.ref)}`);
-  group?.setAttribute("transform", `translate(${nx - state.drag.sceneOriginX},${ny - state.drag.sceneOriginY})`);
+  group?.setAttribute("transform", `translate(${formatNumber(nx - state.drag.sceneOriginX)},${formatNumber(ny - state.drag.sceneOriginY)})`);
   statusEl.textContent = `${state.drag.ref} ${nx}, ${ny}`;
 }
 
 function onPointerUp() {
   if (state.drag?.type === "component" && state.drag.active) {
     state.suppressClick = true;
-    state.drag.group.releasePointerCapture?.(state.drag.pointerId);
     setTimeout(() => state.suppressClick = false, 0);
   }
+  releasePointer(state.drag?.captureTarget, state.drag?.pointerId);
   state.drag = null;
 }
 
@@ -298,6 +330,40 @@ function draggableComponentForTarget(target, sceneElement) {
   return target.closest?.("[data-kind='component_group'], .component") || null;
 }
 
+function readTranslate(el) {
+  const matrix = el.transform?.baseVal?.consolidate?.()?.matrix;
+  if (matrix && Number.isFinite(matrix.e) && Number.isFinite(matrix.f)) return { x: matrix.e, y: matrix.f };
+  const attr = el.getAttribute("transform") || "";
+  const match = attr.match(/translate\(\s*([-+]?\d*\.?\d+)(?:[,\s]+([-+]?\d*\.?\d+))?\s*\)/);
+  return match ? { x: finiteNumber(match[1], 0), y: finiteNumber(match[2], 0) } : { x: 0, y: 0 };
+}
+
+function finiteNumber(value, fallback) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : fallback;
+}
+
+function formatNumber(value) {
+  const number = Number.isFinite(value) ? value : 0;
+  return Math.abs(number) < 0.0001 ? "0" : String(Number(number.toFixed(3)));
+}
+
+function capturePointer(target, pointerId) {
+  try {
+    target?.setPointerCapture?.(pointerId);
+  } catch {
+    // Pointer capture is helpful but not required for the drag model.
+  }
+}
+
+function releasePointer(target, pointerId) {
+  try {
+    target?.releasePointerCapture?.(pointerId);
+  } catch {
+    // The browser may release capture automatically on pointerup.
+  }
+}
+
 function cssSafe(value) { return CSS.escape(value); }
 
 document.querySelector("#reload").addEventListener("click", async () => {
@@ -338,6 +404,36 @@ document.querySelector("#search").addEventListener("input", evt => {
   document.querySelectorAll(".component").forEach(el => el.classList.toggle("search-hit", q && el.dataset.ref.toLowerCase().includes(q)));
   document.querySelectorAll(".net").forEach(el => el.classList.toggle("highlight", q && el.dataset.net.toLowerCase().includes(q)));
 });
+
+window.__circuitNetlistDebug = {
+  dragThreshold: DRAG_THRESHOLD_PX,
+  state: () => {
+    const svg = document.querySelector("#schematic");
+    const vb = svg?.viewBox?.baseVal;
+    return {
+      layout: state.layout,
+      selected: state.selected,
+      current: state.current,
+      sceneElementCount: state.scene?.elements?.length || 0,
+      viewBox: vb ? { x: vb.x, y: vb.y, width: vb.width, height: vb.height } : null,
+      drag: state.drag
+        ? {
+            type: state.drag.type,
+            ref: state.drag.ref,
+            pending: state.drag.pending,
+            active: state.drag.active,
+            sceneOriginX: state.drag.sceneOriginX,
+            sceneOriginY: state.drag.sceneOriginY,
+            layoutStartX: state.drag.layoutStartX,
+            layoutStartY: state.drag.layoutStartY,
+            transformStartX: state.drag.transformStartX,
+            transformStartY: state.drag.transformStartY,
+            clientToSvg: state.drag.clientToSvg || null
+          }
+        : null
+    };
+  }
+};
 
 loadAll();
 

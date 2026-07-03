@@ -3,6 +3,7 @@ __pycache__/
 *.py[cod]
 *.pyo
 .pytest_cache/
+.pytest-tmp/
 .mypy_cache/
 .ruff_cache/
 .coverage
@@ -20,6 +21,9 @@ env/
 # Local/generated output
 output/
 test_circuits/generated/
+node_modules/
+playwright-report/
+test-results/
 *.zip
 
 # OS/editor noise
