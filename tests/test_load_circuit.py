@@ -2,7 +2,8 @@ import pytest
 from fastapi import HTTPException
 
 from circuit_netlist import app as app_module
-from circuit_netlist.app import LoadCaseRequest, LoadTextRequest
+from circuit_netlist.app import LayoutSaveRequest, LoadCaseRequest, LoadTextRequest
+from circuit_netlist.models import Layout
 
 
 VALID_TEXT = """CIRCUIT Uploaded_LED
@@ -103,6 +104,17 @@ def test_missing_layout_triggers_autoplacement_for_uploaded_text_and_reload_uses
     reloaded = app_module.reload_current()
     assert reloaded["success"] is True
     assert reloaded["filename"] == "memory.cnet"
+
+
+def test_autoroute_returns_complete_scene_state_for_frontend_refresh() -> None:
+    loaded = app_module.load_text(LoadTextRequest(filename="memory.cnet", text=VALID_TEXT))
+    layout = Layout.model_validate(loaded["schematic"]["layout"])
+    routed = app_module.autoroute(LayoutSaveRequest(layout=layout))
+    assert routed["layout"]["components"]
+    assert routed["scene"]["scene_version"] == "1.0"
+    assert routed["schematic"]["scene"] == routed["scene"]
+    assert routed["schematic"]["layout"] == routed["layout"]
+    assert 'data-scene-version="1.0"' in routed["svg"]
 
 
 def test_regression_expected_summary_for_good_and_fault_cases() -> None:

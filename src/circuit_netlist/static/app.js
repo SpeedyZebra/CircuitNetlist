@@ -1,4 +1,6 @@
-let state = { circuit: null, layout: null, scene: null, sceneById: new Map(), svg: "", scale: 1, panX: 0, panY: 0, selected: null, drag: null, current: null, catalog: null, expected: null, localFile: null, localLayoutFile: null };
+const DRAG_THRESHOLD_PX = 5;
+const NON_COMPONENT_DRAG_KINDS = new Set(["pin", "wire", "wire_stub", "junction", "net_label", "net_label_endpoint", "power_symbol", "ground_symbol", "power_label", "ground_label"]);
+let state = { circuit: null, layout: null, scene: null, sceneById: new Map(), svg: "", scale: 1, panX: 0, panY: 0, selected: null, drag: null, suppressClick: false, current: null, catalog: null, expected: null, localFile: null, localLayoutFile: null };
 const canvas = document.querySelector("#canvas");
 const statusEl = document.querySelector("#status");
 
@@ -21,7 +23,7 @@ async function loadAll({ fresh = false } = {}) {
   }
 }
 
-function applySchematic(payload) {
+function applySchematic(payload, options = {}) {
   const schematic = payload.schematic || payload;
   state.circuit = schematic.circuit;
   state.layout = schematic.layout;
@@ -30,13 +32,15 @@ function applySchematic(payload) {
   state.svg = schematic.svg;
   state.current = payload.current || state.current;
   state.expected = payload.expected || null;
+  state.drag = null;
+  state.suppressClick = false;
   clearSelection();
   canvas.innerHTML = state.svg || "";
   bindSvg();
   renderDiagnostics(payload.diagnostics || []);
   renderExpected(payload.expected || null);
   updateCurrentCircuitLabel();
-  fitSchematic();
+  if (options.fit !== false) fitSchematic();
 }
 
 async function rerouteCurrentLayout() {
@@ -51,12 +55,7 @@ async function rerouteCurrentLayout() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ layout: state.layout })
     }, 20000);
-    state.layout = routed.layout;
-    state.svg = routed.svg;
-    canvas.innerHTML = state.svg;
-    bindSvg();
-    renderDiagnostics(routed.diagnostics || []);
-    fitSchematic();
+    applySchematic(routed);
     const elapsed = ((performance.now() - started) / 1000).toFixed(1);
     statusEl.textContent = `Rerouted current layout in ${elapsed}s`;
   } catch (err) {
@@ -158,13 +157,33 @@ function onWheel(evt) {
 }
 
 function onPointerDown(evt) {
-  const component = evt.target.closest("[data-kind='component_group'], .component");
+  if (evt.button !== undefined && evt.button !== 0) return;
+  const sceneTarget = sceneElementForTarget(evt.target);
+  const component = draggableComponentForTarget(evt.target, sceneTarget);
   const p = svgPoint(evt);
   if (component) {
     const ref = component.dataset.ref;
     const placement = state.layout.components[ref];
-    state.drag = { type: "component", ref, start: p, x: placement.x, y: placement.y };
-    component.setPointerCapture(evt.pointerId);
+    const sceneOriginX = Number(component.dataset.placementX ?? placement.x);
+    const sceneOriginY = Number(component.dataset.placementY ?? placement.y);
+    state.drag = {
+      type: "component",
+      ref,
+      group: component,
+      pointerId: evt.pointerId,
+      pointerStart: p,
+      startClientX: evt.clientX,
+      startClientY: evt.clientY,
+      sceneOriginX,
+      sceneOriginY,
+      layoutStartX: Number(placement.x),
+      layoutStartY: Number(placement.y),
+      pending: true,
+      active: false,
+      moved: false
+    };
+  } else if (sceneTarget) {
+    state.drag = null;
   } else {
     const svg = document.querySelector("#schematic");
     const vb = svg.viewBox.baseVal;
@@ -182,20 +201,40 @@ function onPointerMove(evt) {
     return;
   }
   const p = svgPoint(evt);
+  if (state.drag.pending) {
+    const pixelDistance = Math.hypot(evt.clientX - state.drag.startClientX, evt.clientY - state.drag.startClientY);
+    if (pixelDistance < DRAG_THRESHOLD_PX) return;
+    state.drag.pending = false;
+    state.drag.active = true;
+    state.drag.moved = true;
+    state.drag.group.setPointerCapture?.(state.drag.pointerId);
+  }
   const snap = document.querySelector("#snap-toggle").checked ? (state.layout.canvas.grid || 20) : 1;
-  const nx = Math.round((state.drag.x + p.x - state.drag.start.x) / snap) * snap;
-  const ny = Math.round((state.drag.y + p.y - state.drag.start.y) / snap) * snap;
+  const nx = Math.round((state.drag.layoutStartX + p.x - state.drag.pointerStart.x) / snap) * snap;
+  const ny = Math.round((state.drag.layoutStartY + p.y - state.drag.pointerStart.y) / snap) * snap;
+  if (!Number.isFinite(nx) || !Number.isFinite(ny)) {
+    statusEl.textContent = `Ignored invalid drag for ${state.drag.ref}`;
+    return;
+  }
   state.layout.components[state.drag.ref] = { ...(state.layout.components[state.drag.ref] || {}), x: nx, y: ny };
   if (state.current) state.current.layout_dirty = true;
-    const group = document.querySelector(`#component-${cssSafe(state.drag.ref)}`);
-    group?.setAttribute("transform", `translate(${nx - state.drag.x},${ny - state.drag.y})`);
+  const group = document.querySelector(`#component-${cssSafe(state.drag.ref)}`);
+  group?.setAttribute("transform", `translate(${nx - state.drag.sceneOriginX},${ny - state.drag.sceneOriginY})`);
   statusEl.textContent = `${state.drag.ref} ${nx}, ${ny}`;
 }
 
-function onPointerUp() { state.drag = null; }
+function onPointerUp() {
+  if (state.drag?.type === "component" && state.drag.active) {
+    state.suppressClick = true;
+    state.drag.group.releasePointerCapture?.(state.drag.pointerId);
+    setTimeout(() => state.suppressClick = false, 0);
+  }
+  state.drag = null;
+}
 
 function selectSceneElement(evt) {
   evt.stopPropagation();
+  if (state.suppressClick) return;
   const el = evt.currentTarget.closest("[data-scene-id]") || evt.currentTarget;
   const sceneElement = state.sceneById.get(el.dataset.sceneId) || {};
   if (sceneElement.kind === "pin") return selectPinElement(el, sceneElement);
@@ -249,6 +288,16 @@ function indexScene(scene) {
   return map;
 }
 
+function sceneElementForTarget(target) {
+  const el = target.closest?.("[data-scene-id]");
+  return el ? state.sceneById.get(el.dataset.sceneId) || null : null;
+}
+
+function draggableComponentForTarget(target, sceneElement) {
+  if (sceneElement && NON_COMPONENT_DRAG_KINDS.has(sceneElement.kind)) return null;
+  return target.closest?.("[data-kind='component_group'], .component") || null;
+}
+
 function cssSafe(value) { return CSS.escape(value); }
 
 document.querySelector("#reload").addEventListener("click", async () => {
@@ -268,9 +317,14 @@ document.querySelector("#reload").addEventListener("click", async () => {
 });
 document.querySelector("#reroute").addEventListener("click", rerouteCurrentLayout);
 document.querySelector("#save-layout").addEventListener("click", async () => {
-  await fetch("/api/layout/save", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ layout: state.layout }) });
-  if (state.current) state.current.layout_dirty = false;
-  statusEl.textContent = "Layout saved";
+  try {
+    await fetchJson("/api/layout/save", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ layout: state.layout }) }, 20000);
+    if (state.current) state.current.layout_dirty = false;
+    statusEl.textContent = "Layout saved";
+  } catch (err) {
+    if (state.current) state.current.layout_dirty = true;
+    statusEl.textContent = `Save failed: ${err.message}`;
+  }
 });
 document.querySelector("#export-svg").addEventListener("click", () => window.open("/api/export/svg", "_blank"));
 document.querySelector("#export-png").addEventListener("click", () => window.open("/api/export/png", "_blank"));

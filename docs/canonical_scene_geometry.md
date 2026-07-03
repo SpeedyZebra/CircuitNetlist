@@ -23,7 +23,7 @@ The canonical scene is now the single geometry owner for visible schematic outpu
 The canonical scene records:
 
 - Canvas bounds and scene version.
-- Component groups, bodies, symbol bounds, pins, pin labels, reference labels, and value labels.
+- Component groups, hidden logical bodies, optional visible bodies, symbol bounds, pins, pin labels, reference labels, and value labels.
 - Physical routed wires.
 - Power-symbol, ground-symbol, and net-label attachment stubs.
 - Net labels, power labels, ground labels, and junctions.
@@ -40,7 +40,7 @@ Renderable primitives are stored as structured `RenderPrimitive` records such as
 
 The DRC reads:
 
-- `component_body` primitive rectangles for component overlap checks.
+- Hidden `component_body` primitive rectangles for component overlap checks.
 - `component_symbol` collision bounds for wire/symbol checks.
 - `pin` elements for legal pin contact exceptions.
 - Scene wire and stub line primitives for wire length and overlap checks.
@@ -70,6 +70,8 @@ The running app also exposes:
 ```
 
 Browser SVG output includes stable `data-scene-id` attributes. The UI uses those IDs and scene metadata to resolve component, pin, wire, junction, net-label, power-symbol, and ground-symbol selections.
+
+Component groups also include immutable `data-placement-x` and `data-placement-y` scene origins. The browser uses those origins for cumulative drag transforms after Milestone 2C.
 
 ## PNG Export
 

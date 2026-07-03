@@ -185,6 +185,7 @@ def _element_attrs(element: SceneElement) -> dict[str, Any]:
 def _element_class(element: SceneElement) -> str:
     return {
         "component_body": "body",
+        "component_visible_body": "body",
         "component_symbol": "symbol",
         "pin": "pin",
         "wire": "wire",

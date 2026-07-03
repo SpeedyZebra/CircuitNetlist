@@ -81,7 +81,7 @@ svg { width: 100%; height: 100%; display: block; user-select: none; }
 .ic-body { fill: #cfd6df; }
 .hit-area { fill: transparent; pointer-events: all; }
 .component.selected .body, .component.selected .symbol { stroke: var(--accent); stroke-width: 3; }
-.component.search-hit .body { stroke: #b5ff6c; stroke-width: 3; }
+.component.search-hit .body, .component.search-hit .symbol { stroke: #b5ff6c; stroke-width: 3; }
 .wire { stroke: #b7c4d2; stroke-width: 3; fill: none; pointer-events: stroke; }
 .net.highlight .wire, .wire.highlight { stroke: var(--accent); stroke-width: 5; }
 .junction { fill: #d7e3ef; }

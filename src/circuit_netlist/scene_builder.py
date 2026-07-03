@@ -22,6 +22,26 @@ from .schematic_geometry import (
 from .symbol_geometry import component_symbol_primitives
 
 
+VISIBLE_BODY_RENDERERS = {"functional_block", "battery", "solar_panel", "dip_ic", "timer_555"}
+OPEN_SYMBOL_RENDERERS = {
+    "resistor",
+    "capacitor",
+    "polarized_capacitor",
+    "inductor",
+    "diode",
+    "led",
+    "nmos",
+    "pmos",
+    "npn",
+    "pnp",
+    "op_amp",
+    "ground",
+    "test_point",
+    "dc_source",
+    "switch",
+}
+
+
 def build_schematic_scene(circuit: Circuit, library: ComponentLibrary, layout: Layout, routes: list[RoutedNet]) -> SchematicScene:
     """Build the canonical geometry scene shared by rendering, DRC, and hit testing."""
     context = LabelPlacementContext(circuit, library, layout, routes)
@@ -297,11 +317,37 @@ def _component_elements(ref: str, definition: ComponentDefinition, placement: Pl
             bounds=body_bounds,
             collision_bounds=body_bounds,
             hit_bounds=body_bounds.expanded(8),
-            primitives=[RenderPrimitive(kind="rect", style_class=_body_css_class(definition), geometry={"x": placement.x, "y": placement.y, "width": width, "height": height, "rx": 6 if definition.body.renderer in {"dip_ic", "timer_555"} else 4})],
+            primitives=[RenderPrimitive(kind="rect", style_class="logical-body", geometry={"x": placement.x, "y": placement.y, "width": width, "height": height, "rx": 6 if definition.body.renderer in {"dip_ic", "timer_555"} else 4})],
             z_index=component_index * 100 + 1,
-            selectable=True,
+            selectable=False,
+            visible=False,
+            metadata={"body_role": "logical_bounds", "visible_body": has_visible_body(definition)},
         )
     )
+    if has_visible_body(definition):
+        elements.append(
+            SceneElement(
+                id=f"{group_id}:visible-body",
+                kind="component_visible_body",
+                layer="geometry",
+                parent_id=group_id,
+                component_ref=ref,
+                component_id=definition.id,
+                bounds=body_bounds,
+                collision_bounds=body_bounds,
+                hit_bounds=body_bounds.expanded(8),
+                primitives=[
+                    RenderPrimitive(
+                        kind="rect",
+                        style_class=_body_css_class(definition),
+                        geometry={"x": placement.x, "y": placement.y, "width": width, "height": height, "rx": 6 if definition.body.renderer in {"dip_ic", "timer_555"} else 4},
+                    )
+                ],
+                z_index=component_index * 100 + 1,
+                selectable=True,
+                metadata={"body_role": "visible_artwork"},
+            )
+        )
     elements.append(
         SceneElement(
             id=f"{group_id}:symbol",
@@ -526,6 +572,19 @@ def _body_css_class(definition: ComponentDefinition) -> str:
     if definition.body.renderer == "dip_ic":
         return "body ic-body"
     return "body"
+
+
+def has_visible_body(definition: ComponentDefinition) -> bool:
+    visual_body = str(definition.metadata.get("visual_body", "")).lower()
+    if visual_body in {"block", "package", "visible"}:
+        return True
+    if visual_body in {"none", "symbol_only", "hidden"}:
+        return False
+    if definition.body.renderer in VISIBLE_BODY_RENDERERS:
+        return True
+    if definition.body.renderer in OPEN_SYMBOL_RENDERERS:
+        return False
+    return True
 
 
 def _bounds_union(bounds: list[Bounds]) -> Bounds | None:

@@ -528,9 +528,31 @@ def autoroute(request: LayoutSaveRequest | None = None) -> dict[str, object]:
             request.layout.model_dump_json() if request and request.layout else CURRENT_STATE.layout_text,
             update_state=False,
         )
-        return {"layout": response["schematic"]["layout"], "svg": response["schematic"]["svg"], "diagnostics": response["diagnostics"]}
+        return {
+            "layout": response["schematic"]["layout"],
+            "scene": response["schematic"].get("scene"),
+            "svg": response["schematic"]["svg"],
+            "diagnostics": response["diagnostics"],
+            "schematic": response["schematic"],
+            "current": CURRENT_STATE.model_dump(mode="json"),
+            "expected": response["expected"],
+        }
     rendered = build_current(request.layout if request else None)
-    return {"layout": rendered.layout.model_dump(mode="json"), "svg": rendered.svg, "diagnostics": [d.model_dump() for d in rendered.diagnostics]}
+    scene_payload = None
+    svg = rendered.svg
+    if rendered.circuit:
+        lib = library()
+        routes = ManhattanRouter().route(rendered.circuit, lib, rendered.layout)
+        scene = build_schematic_scene(rendered.circuit, lib, rendered.layout, routes)
+        scene_payload = scene.model_dump(mode="json")
+        svg = render_scene_svg(scene, rendered.diagnostics)
+    schematic = {
+        "layout": rendered.layout.model_dump(mode="json"),
+        "scene": scene_payload,
+        "svg": svg,
+        "circuit": rendered.circuit.model_dump(mode="json") if rendered.circuit else None,
+    }
+    return {"layout": schematic["layout"], "scene": scene_payload, "svg": svg, "diagnostics": [d.model_dump() for d in rendered.diagnostics], "schematic": schematic, "current": CURRENT_STATE.model_dump(mode="json")}
 
 
 @app.get("/api/export/svg")

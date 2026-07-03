@@ -60,18 +60,36 @@ Existing ids and classes are preserved where useful, such as `component-U1`, `pi
 - DIP/555 symbols use body primitives plus notch, pin-one, and title text primitives.
 - Op amps, inductors, ground symbols, test points, and DC sources are also primitive based.
 
+Milestone 2C separates logical bounds from visible body artwork:
+
+- `component_body` is a hidden logical rectangle used for DRC and geometry checks.
+- `component_visible_body` is emitted only for symbols that should visually show a package or block.
+- Open schematic symbols such as resistors, capacitors, LEDs, MOSFETs, op amps, inductors, test points, and DC sources do not receive an extra visible body rectangle.
+- Box and package symbols such as functional blocks, batteries, solar panels, DIP ICs, and the 555 timer retain visible body artwork.
+
 The legacy `RendererRegistry` remains only for compatibility. Production scene construction does not call it.
 
 ## DRC And Hit Geometry
 
 Visual DRC consumes scene primitive geometry:
 
-- Component body rectangles provide body collision boxes.
+- Hidden `component_body` rectangles provide body collision boxes.
 - Wire line primitives provide wire length and overlap data.
 - Pin circle primitives provide same-pin contact exemptions.
 - Text geometry provides wire/text metrics.
 
-Python hit testing also uses scene primitives, especially line distance for wires and primitive bounds for selectable bodies, pins, and symbols.
+Python hit testing also uses scene primitives, especially line distance for wires and primitive bounds for pins and symbols. Open symbol component selection is carried by the visible `component_group` hit bounds and browser hit-area rectangle, not by rendering the hidden logical body.
+
+## Browser Interaction
+
+Component SVG groups include immutable scene placement metadata:
+
+- `data-placement-x`
+- `data-placement-y`
+
+Browser dragging computes `current_layout - scene_origin`, which keeps repeated drags cumulative even though the underlying SVG primitives remain in scene coordinates. A drag begins only after 5 CSS pixels of movement. Pins, wires, junctions, net labels, and power/ground symbols keep their own selection behavior and do not initiate component drags.
+
+Reroute responses include layout, scene, SVG, diagnostics, and nested schematic data. The frontend applies them through the same central `applySchematic` path used by load and reload so scene IDs do not go stale.
 
 ## PNG Export
 

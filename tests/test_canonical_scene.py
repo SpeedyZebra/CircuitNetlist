@@ -92,17 +92,29 @@ def test_scene_endpoint_and_scene_export_helpers(tmp_path: Path) -> None:
         assert image.size == (int(scene.canvas_bounds.width), int(scene.canvas_bounds.height))
 
 
-def test_body_primitive_mutation_controls_svg_and_drc() -> None:
+def test_hidden_body_primitive_mutation_controls_drc_without_changing_svg() -> None:
     _, _, _, _, scene = load_scene()
     first = scene.first("component-CHG1:body")
     second = scene.first("component-BAT1:body")
     assert first is not None and second is not None
+    assert first.visible is False
     svg_before = render_scene_svg(scene, [])
     first.primitives[0].geometry.update(second.primitives[0].geometry)
     diagnostics, _ = visual_drc_from_scene(scene)
     svg_after = render_scene_svg(scene, [])
-    assert svg_before != svg_after
+    assert svg_before == svg_after
     assert "DRC_COMPONENT_OVERLAP" in [diag.code for diag in diagnostics]
+
+
+def test_visible_body_primitive_mutation_controls_svg() -> None:
+    _, _, _, _, scene = load_scene()
+    first = scene.first("component-CHG1:visible-body")
+    second = scene.first("component-BAT1:visible-body")
+    assert first is not None and second is not None
+    svg_before = render_scene_svg(scene, [])
+    first.primitives[0].geometry.update(second.primitives[0].geometry)
+    svg_after = render_scene_svg(scene, [])
+    assert svg_before != svg_after
 
 
 def test_wire_primitive_mutation_controls_svg_drc_and_hit_testing() -> None:
