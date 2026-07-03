@@ -86,19 +86,25 @@ Status: complete
 
 Implemented in this branch:
 
+- Milestone 2A foundation: typed scene model, scene JSON, scene debug CLI, and scene-aware DRC entry point.
+- Milestone 2B authority: production SVG now serializes canonical scene primitives rather than opaque legacy SVG fragments.
 - Typed scene primitives and elements in `scene.py`.
 - `build_schematic_scene` as the shared geometry owner for component bodies, symbol bounds, pin anchors, text bounds, wires, stubs, labels, junctions, and canvas bounds.
-- Scene-backed SVG rendering through `render_scene_svg` while preserving the current SVG ids/classes used by the UI.
+- Structured component symbol primitives in `symbol_geometry.py`.
+- Neutral text, label, power-symbol, and pin-label helpers in `schematic_geometry.py`.
+- Scene-backed SVG rendering through `render_scene_svg` with stable `data-scene-id` attributes.
 - Scene-backed visual DRC through `visual_drc_from_scene`.
-- Scene hit-testing helpers.
+- Scene hit-testing helpers and `/api/circuit/scene/hit-test`.
+- Browser interaction using scene IDs for component, pin, wire, junction, label, and power/ground symbol ownership.
+- Real PNG bytes from scene primitive rasterization with Pillow.
 - `/api/circuit/scene` debug endpoint.
 - `scene_debug` CLI for JSON and scene-derived SVG dumps.
 - Scene-based export helper functions.
-- Regression tests covering scene construction, rendering, DRC delegation, hit testing, app endpoint output, and scene export helpers.
+- Regression tests covering scene construction, primitive rendering, DRC delegation, hit testing, app endpoint output, scene export helpers, mutation authority, and import boundaries.
 
 Still intentionally limited to Milestone 2 scope:
 
-- Component internals are still rendered by existing SVG fragment helpers, with canonical geometry recorded alongside them.
-- Browser interaction still primarily uses existing SVG DOM ids/classes.
-- PNG export remains a truthful placeholder until a raster backend is added.
 - Placement and routing consume topology and layout inputs as before; they are not yet driven by scene-level collision solving.
+- The legacy renderer registry remains for compatibility but is not used by production scene construction.
+- PNG path curves/arcs are approximate in the Pillow raster backend.
+- Browser drag still applies a temporary SVG transform until reroute/reload regenerates the scene.

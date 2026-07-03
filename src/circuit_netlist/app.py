@@ -11,14 +11,16 @@ from pydantic import BaseModel
 
 from .component_library import ComponentLibrary, load_component_library
 from .erc import ElectricalRuleChecker
-from .exporters import export_svg
+from .exporters import export_png_bytes_from_scene, export_png_from_scene, export_svg
+from .hit_testing import hit_test_all
 from .models import Circuit, Diagnostic, Layout, RenderedCircuit, Severity
 from .parser import NetlistParser
 from .placement import DeterministicPlacementEngine
-from .regression import compare_diagnostic_codes, detect_patterns, engineering_calculations, visual_drc
+from .regression import compare_diagnostic_codes, detect_patterns, engineering_calculations, visual_drc, visual_drc_from_scene
 from .renderer import render_circuit
 from .router import ManhattanRouter
 from .scene_builder import build_schematic_scene
+from .scene_renderer import render_scene_svg
 from .topology import TopologyAnalyzer
 from .validator import CircuitValidator, has_blocking_diagnostics
 
@@ -49,6 +51,12 @@ class LoadTextRequest(BaseModel):
 
 class LoadCaseRequest(BaseModel):
     case_id: str
+
+
+class HitTestRequest(BaseModel):
+    x: float
+    y: float
+    tolerance: float = 6
 
 
 class CurrentCircuitState(BaseModel):
@@ -150,11 +158,16 @@ def render_loaded_circuit(
             for route in routes:
                 for warning in route.warnings:
                     diagnostics.append(Diagnostic(severity=Severity.WARNING, message=warning))
-            drc_findings, metrics = visual_drc(circuit, lib, layout, routes)
+            scene = build_schematic_scene(circuit, lib, layout, routes)
+            drc_findings, metrics = visual_drc_from_scene(scene)
             diagnostics.extend(drc_findings)
             patterns = detect_patterns(circuit, lib)
             calculations = engineering_calculations(circuit, lib)
-            svg = render_circuit(circuit, lib, layout, routes, diagnostics)
+            svg = render_scene_svg(scene, diagnostics)
+        else:
+            scene = None
+    else:
+        scene = None
 
     actual_codes = sorted({diag.code for diag in diagnostics if diag.code})
     expected_match = compare_expected_codes(expected_codes, actual_codes) if case_id else None
@@ -186,7 +199,7 @@ def render_loaded_circuit(
         "drc": [diag.model_dump(mode="json") for diag in drc_findings],
         "diagnostics": [diag.model_dump(mode="json") for diag in diagnostics],
         "render_allowed": render_allowed,
-        "schematic": {"svg": svg, "layout": layout.model_dump(mode="json"), "circuit": circuit.model_dump(mode="json") if circuit else None},
+        "schematic": {"svg": svg, "layout": layout.model_dump(mode="json"), "circuit": circuit.model_dump(mode="json") if circuit else None, "scene": scene.model_dump(mode="json") if scene else None},
         "layout_loaded": layout_loaded,
         "expected": {"codes": expected_codes, "actual_codes": actual_codes, "match": expected_match},
         "patterns": patterns,
@@ -467,6 +480,33 @@ def current_scene() -> dict[str, Any]:
     return current_scene_payload()
 
 
+@app.post("/api/circuit/scene/hit-test")
+def current_scene_hit_test(request: HitTestRequest) -> dict[str, Any]:
+    payload = current_scene_payload()
+    if not payload.get("scene"):
+        return {"hits": [], "diagnostics": payload.get("diagnostics", [])}
+    from .scene import SchematicScene
+
+    scene = SchematicScene.model_validate(payload["scene"])
+    hits = hit_test_all(scene, request.x, request.y, request.tolerance)
+    return {
+        "hits": [
+            {
+                "scene_id": hit.id,
+                "kind": hit.kind,
+                "owner": hit.owner_id or hit.parent_id,
+                "component_ref": hit.component_ref,
+                "pin_name": hit.pin_name,
+                "pin_number": hit.pin_number,
+                "net_name": hit.net_name,
+                "z_index": hit.z_index,
+                "priority": index,
+            }
+            for index, hit in enumerate(hits)
+        ]
+    }
+
+
 @app.post("/api/layout/save")
 def save_layout(request: LayoutSaveRequest) -> dict[str, str]:
     CURRENT_STATE.layout_text = request.layout.model_dump_json(indent=2)
@@ -498,3 +538,19 @@ def export_current_svg() -> Response:
     rendered = build_current()
     export_svg(rendered.svg, ROOT / "output" / "solar_led.svg")
     return Response(rendered.svg, media_type="image/svg+xml")
+
+
+@app.get("/api/export/png")
+def export_current_png() -> Response:
+    payload = current_scene_payload()
+    if not payload.get("scene"):
+        raise HTTPException(status_code=400, detail="No renderable scene is available")
+    from .scene import SchematicScene
+
+    scene = SchematicScene.model_validate(payload["scene"])
+    try:
+        png_bytes = export_png_bytes_from_scene(scene)
+        export_png_from_scene(scene, ROOT / "output" / "solar_led.png")
+    except RuntimeError as exc:
+        raise HTTPException(status_code=501, detail=str(exc)) from exc
+    return Response(png_bytes, media_type="image/png")

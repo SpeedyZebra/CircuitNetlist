@@ -1,4 +1,4 @@
-let state = { circuit: null, layout: null, svg: "", scale: 1, panX: 0, panY: 0, selected: null, drag: null, current: null, catalog: null, expected: null, localFile: null, localLayoutFile: null };
+let state = { circuit: null, layout: null, scene: null, sceneById: new Map(), svg: "", scale: 1, panX: 0, panY: 0, selected: null, drag: null, current: null, catalog: null, expected: null, localFile: null, localLayoutFile: null };
 const canvas = document.querySelector("#canvas");
 const statusEl = document.querySelector("#status");
 
@@ -25,6 +25,8 @@ function applySchematic(payload) {
   const schematic = payload.schematic || payload;
   state.circuit = schematic.circuit;
   state.layout = schematic.layout;
+  state.scene = schematic.scene || null;
+  state.sceneById = indexScene(state.scene);
   state.svg = schematic.svg;
   state.current = payload.current || state.current;
   state.expected = payload.expected || null;
@@ -130,13 +132,10 @@ function bindSvg() {
   svg.addEventListener("pointermove", onPointerMove);
   svg.addEventListener("pointerup", onPointerUp);
   svg.addEventListener("pointerleave", onPointerUp);
-  svg.querySelectorAll(".component").forEach(el => el.addEventListener("click", selectComponent));
-  svg.querySelectorAll(".pin").forEach(el => {
-    el.addEventListener("click", selectPin);
+  svg.querySelectorAll("[data-scene-id][data-selectable='true']").forEach(el => el.addEventListener("click", selectSceneElement));
+  svg.querySelectorAll("[data-kind='pin']").forEach(el => {
     el.addEventListener("mouseenter", () => statusEl.textContent = `${el.dataset.ref}.${el.dataset.pinName} ${el.dataset.electricalType}`);
   });
-  svg.querySelectorAll(".wire,.net").forEach(el => el.addEventListener("click", selectNet));
-  svg.querySelectorAll(".net-label-endpoint,.power-symbol,.label-flag,.power-shape,.net-label").forEach(el => el.addEventListener("click", selectNet));
 }
 
 function svgPoint(evt) {
@@ -159,7 +158,7 @@ function onWheel(evt) {
 }
 
 function onPointerDown(evt) {
-  const component = evt.target.closest(".component");
+  const component = evt.target.closest("[data-kind='component_group'], .component");
   const p = svgPoint(evt);
   if (component) {
     const ref = component.dataset.ref;
@@ -188,31 +187,41 @@ function onPointerMove(evt) {
   const ny = Math.round((state.drag.y + p.y - state.drag.start.y) / snap) * snap;
   state.layout.components[state.drag.ref] = { ...(state.layout.components[state.drag.ref] || {}), x: nx, y: ny };
   if (state.current) state.current.layout_dirty = true;
-  document.querySelector(`#component-${cssSafe(state.drag.ref)}`).setAttribute("transform", `translate(${nx},${ny}) rotate(0)`);
+    const group = document.querySelector(`#component-${cssSafe(state.drag.ref)}`);
+    group?.setAttribute("transform", `translate(${nx - state.drag.x},${ny - state.drag.y})`);
   statusEl.textContent = `${state.drag.ref} ${nx}, ${ny}`;
 }
 
 function onPointerUp() { state.drag = null; }
 
-function selectComponent(evt) {
+function selectSceneElement(evt) {
   evt.stopPropagation();
+  const el = evt.currentTarget.closest("[data-scene-id]") || evt.currentTarget;
+  const sceneElement = state.sceneById.get(el.dataset.sceneId) || {};
+  if (sceneElement.kind === "pin") return selectPinElement(el, sceneElement);
+  if (sceneElement.net_name || el.dataset.net) return selectNetElement(el, sceneElement);
+  if (sceneElement.component_ref || el.dataset.ref) return selectComponentElement(el, sceneElement);
+}
+
+function selectComponentElement(el, sceneElement = {}) {
   clearSelection();
-  const el = evt.currentTarget;
-  el.classList.add("selected");
-  state.selected = el.dataset.ref;
-  const comp = state.circuit.components.find(c => c.ref === el.dataset.ref);
+  const ref = sceneElement.component_ref || el.dataset.ref;
+  document.querySelector(`#component-${cssSafe(ref)}`)?.classList.add("selected");
+  state.selected = sceneElement.id || el.dataset.sceneId || ref;
+  const comp = state.circuit.components.find(c => c.ref === ref);
   document.querySelector("#properties").innerHTML = rows({ Reference: comp.ref, Type: comp.component_id, Parameters: JSON.stringify(comp.parameters) });
 }
 
-function selectPin(evt) {
-  evt.stopPropagation();
-  const p = evt.currentTarget.dataset;
-  document.querySelector("#properties").innerHTML = rows({ Component: p.ref, Pin: `${p.pinNumber} ${p.pinName}`, Type: p.electricalType, Net: findPinNet(p.ref, p.pinName) || "" });
+function selectPinElement(el, sceneElement = {}) {
+  const p = el.dataset;
+  const ref = sceneElement.component_ref || p.ref;
+  const pinName = sceneElement.pin_name || p.pinName;
+  const pinNumber = sceneElement.pin_number || p.pinNumber;
+  document.querySelector("#properties").innerHTML = rows({ Component: ref, Pin: `${pinNumber} ${pinName}`, Type: p.electricalType || "", Net: findPinNet(ref, pinName) || "" });
 }
 
-function selectNet(evt) {
-  evt.stopPropagation();
-  const net = evt.currentTarget.dataset.net || evt.currentTarget.closest("[data-net]")?.dataset.net;
+function selectNetElement(el, sceneElement = {}) {
+  const net = sceneElement.net_name || el.dataset.net || el.closest("[data-net]")?.dataset.net;
   const group = document.querySelector(`#net-${cssSafe(net)}`);
   const style = group?.dataset.renderStyle || "local_wire";
   document.querySelectorAll(".net").forEach(n => n.classList.toggle("highlight", n.dataset.net === net));
@@ -232,6 +241,12 @@ function rows(obj) {
 
 function clearSelection() {
   document.querySelectorAll(".component.selected").forEach(e => e.classList.remove("selected"));
+}
+
+function indexScene(scene) {
+  const map = new Map();
+  for (const element of scene?.elements || []) map.set(element.id, element);
+  return map;
 }
 
 function cssSafe(value) { return CSS.escape(value); }
@@ -258,7 +273,7 @@ document.querySelector("#save-layout").addEventListener("click", async () => {
   statusEl.textContent = "Layout saved";
 });
 document.querySelector("#export-svg").addEventListener("click", () => window.open("/api/export/svg", "_blank"));
-document.querySelector("#export-png").addEventListener("click", () => alert("PNG export uses browser conversion in a future version; SVG export is available now."));
+document.querySelector("#export-png").addEventListener("click", () => window.open("/api/export/png", "_blank"));
 document.querySelector("#fit").addEventListener("click", () => {
   fitSchematic();
 });

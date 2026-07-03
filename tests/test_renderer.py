@@ -25,6 +25,7 @@ from circuit_netlist.renderer import (
     text_box,
 )
 from circuit_netlist.router import ManhattanRouter
+from circuit_netlist.scene_builder import build_schematic_scene
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -60,7 +61,8 @@ def test_svg_output_contains_stable_ids_and_orthogonal_wires() -> None:
     assert 'id="component-U1"' in svg
     assert 'id="pin-U1-1"' in svg
     assert 'id="net-VBAT"' in svg
-    assert '<line id="wire-' in svg
+    assert 'id="wire-' in svg
+    assert 'data-scene-id=' in svg
     assert all(x1 == x2 or y1 == y2 for route in routes for x1, y1, x2, y2 in route.segments)
     assert 'power-symbol-GND' in svg
     assert 'power-symbol-VBAT' in svg
@@ -70,12 +72,17 @@ def test_svg_output_contains_stable_ids_and_orthogonal_wires() -> None:
 def test_power_symbols_and_led_render_on_pin_centerlines() -> None:
     library, circuit, layout, routes = load_example()
     svg = render_circuit(circuit, library, layout, routes, [])
-    assert '<line class="symbol" x1="0" y1="40" x2="50" y2="40"/>' in svg
-    assert '<circle class="pin-contact" cx="0" cy="40" r="5"/>' in svg
-    assert '<circle class="pin-contact" cx="140" cy="40" r="5"/>' in svg
-    assert '<line class="wire power-stub" data-net="VBAT" x1="' in svg
-    assert 'class="wire power-stub ground-stub" data-net="GND"' in svg
-    assert 'class="net-label ground-label" data-net="GND"' in svg
+    led_scene = build_schematic_scene(circuit, library, layout, routes)
+    led_symbol = led_scene.first("component-LED1:symbol")
+    assert led_symbol is not None
+    led_x = layout.components["LED1"].x
+    led_y = layout.components["LED1"].y
+    assert any(primitive.kind == "line" and primitive.geometry == {"x1": led_x, "y1": led_y + 40, "x2": led_x + 50, "y2": led_y + 40} for primitive in led_symbol.primitives)
+    assert any(primitive.kind == "circle" and primitive.geometry == {"cx": led_x, "cy": led_y + 40, "r": 5} for primitive in led_symbol.primitives)
+    assert any(primitive.kind == "circle" and primitive.geometry == {"cx": led_x + 140, "cy": led_y + 40, "r": 5} for primitive in led_symbol.primitives)
+    assert 'class="wire power-stub"' in svg
+    assert 'class="wire power-stub ground-stub"' in svg
+    assert 'class="net-label ground-label"' in svg
     assert 'class="power-shape power-flag"' in svg
 
     source = library.get("POWER_DC_SOURCE")
@@ -89,9 +96,9 @@ def test_power_symbols_and_led_render_on_pin_centerlines() -> None:
     )
     assert source.body.renderer == "dc_source"
     assert f'data-component-id="{source.id}"' in source_svg
-    assert '<circle class="symbol" cx="50" cy="60" r="36"/>' in source_svg
-    assert '<line class="symbol" x1="50" y1="0" x2="50" y2="24"/>' in source_svg
-    assert '<circle class="pin-contact" cx="50" cy="0" r="5"/>' in source_svg
+    assert 'class="symbol" cx="150" cy="160" r="36"' in source_svg
+    assert 'class="symbol" x1="150" y1="100" x2="150" y2="124"' in source_svg
+    assert 'class="pin-contact" cx="150" cy="100" r="5"' in source_svg
 
 
 def test_power_and_label_attachments_use_mandatory_pin_escape() -> None:
@@ -197,10 +204,14 @@ def test_led_wires_terminate_on_led_pin_contacts() -> None:
 
 def test_mosfet_wires_terminate_on_mosfet_pin_contacts() -> None:
     library, circuit, layout, routes = load_example()
-    svg = render_circuit(circuit, library, layout, routes, [])
-    assert '<circle class="pin-contact" cx="0" cy="40" r="5"/>' in svg
-    assert '<circle class="pin-contact" cx="80" cy="0" r="5"/>' in svg
-    assert '<circle class="pin-contact" cx="80" cy="120" r="5"/>' in svg
+    scene = build_schematic_scene(circuit, library, layout, routes)
+    q1_symbol = scene.first("component-Q1:symbol")
+    assert q1_symbol is not None
+    q1_x = layout.components["Q1"].x
+    q1_y = layout.components["Q1"].y
+    assert any(primitive.kind == "circle" and primitive.geometry == {"cx": q1_x, "cy": q1_y + 40, "r": 5} for primitive in q1_symbol.primitives)
+    assert any(primitive.kind == "circle" and primitive.geometry == {"cx": q1_x + 80, "cy": q1_y, "r": 5} for primitive in q1_symbol.primitives)
+    assert any(primitive.kind == "circle" and primitive.geometry == {"cx": q1_x + 80, "cy": q1_y + 120, "r": 5} for primitive in q1_symbol.primitives)
 
     q1_definition = library.get("BASIC_NMOS")
     q1_placement = layout.components["Q1"]
@@ -218,7 +229,7 @@ def test_mosfet_symbol_is_conventional_enhancement_mode() -> None:
     library, circuit, layout, routes = load_example()
     svg = render_circuit(circuit, library, layout, routes, [])
     start = svg.index('id="component-Q1"')
-    end = svg.index("</g></g>", start) if "</g></g>" in svg[start:] else start + 2000
+    end = svg.index('id="component-LED1"', start)
     q1_svg = svg[start:end]
     assert 'data-component-id="BASIC_NMOS"' in q1_svg
     assert '<circle class="symbol" cx="80" cy="60"' not in q1_svg
@@ -253,8 +264,8 @@ def test_555_timer_symbol_renders_named_astable_body_and_standard_pins() -> None
     svg = render_circuit(circuit, library, Layout(components={"U1": Placement(x=100, y=100)}), [], [])
     assert 'data-component-id="BASIC_555_TIMER"' in svg
     assert 'class="body ic-body timer-555-body"' in svg
-    assert '<text class="timer-title" x="90.0" y="102.0" text-anchor="middle">555</text>' in svg
-    assert '<text class="timer-subtitle" x="90.0" y="128.0" text-anchor="middle">Astable</text>' in svg
+    assert 'class="timer-title" x="190" y="202" text-anchor="middle"' in svg
+    assert 'class="timer-subtitle" x="190" y="228" text-anchor="middle"' in svg
     for number, name in [("1", "GND"), ("2", "TRIG"), ("3", "OUT"), ("4", "RESET"), ("5", "CTRL"), ("6", "THRESH"), ("7", "DISCH"), ("8", "VCC")]:
         assert f'data-pin-number="{number}" data-pin-name="{name}"' in svg
 

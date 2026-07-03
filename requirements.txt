@@ -4,4 +4,5 @@ pydantic>=2.7,<3
 PyYAML>=6.0,<7
 lark>=1.1,<2
 networkx>=3.3,<4
+pillow>=12,<13
 pytest>=8.2,<9

@@ -128,9 +128,18 @@ class TextGeometry(BaseModel):
 
 
 class RenderPrimitive(BaseModel):
+    id: str | None = None
     kind: str
     geometry: dict[str, Any] = Field(default_factory=dict)
     style_class: str | None = None
+    stroke: str | None = None
+    stroke_width: float | None = None
+    fill: str | None = None
+    line_cap: str | None = None
+    line_join: str | None = None
+    dash_pattern: str | None = None
+    text_style: dict[str, Any] = Field(default_factory=dict)
+    visible: bool = True
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -154,6 +163,7 @@ class SceneElement(BaseModel):
     selectable: bool = False
     visible: bool = True
     drc_enabled: bool = True
+    hit_test_enabled: bool = True
     metadata: dict[str, Any] = Field(default_factory=dict)
 
     def active_collision_bounds(self) -> Bounds:

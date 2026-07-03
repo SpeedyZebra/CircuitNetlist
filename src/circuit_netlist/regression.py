@@ -245,7 +245,7 @@ def visual_drc_from_scene(scene: SchematicScene) -> tuple[list[Diagnostic], dict
     physical_text_boxes = []
     for element in scene.elements:
         if element.kind == "component_body" and element.component_ref:
-            body_boxes.append((element.component_ref, element.active_collision_bounds().as_tuple()))
+            body_boxes.append((element.component_ref, _element_rect_box(element) or element.active_collision_bounds().as_tuple()))
         if element.kind == "component_symbol" and element.component_ref:
             symbol_boxes.append((element.component_ref, element.active_collision_bounds().as_tuple()))
         if element.kind == "pin" and element.component_ref:
@@ -306,7 +306,7 @@ def wire_like_segments_from_scene(scene: SchematicScene) -> list[tuple[str, str,
     for element in scene.elements:
         if element.kind not in {"wire", "wire_stub"}:
             continue
-        segment = element.metadata.get("segment")
+        segment = _line_segment_from_element(element)
         if not segment or len(segment) != 4:
             continue
         segments.append(
@@ -314,10 +314,31 @@ def wire_like_segments_from_scene(scene: SchematicScene) -> list[tuple[str, str,
                 element.net_name or "",
                 str(element.metadata.get("wire_kind", "wire")),
                 str(element.metadata.get("source_ref", "")),
-                (int(segment[0]), int(segment[1]), int(segment[2]), int(segment[3])),
+                segment,
             )
         )
     return segments
+
+
+def _line_segment_from_element(element: Any) -> tuple[int, int, int, int] | None:
+    primitive = next((primitive for primitive in element.primitives if primitive.kind == "line"), None)
+    if primitive:
+        geometry = primitive.geometry
+        return (round(float(geometry["x1"])), round(float(geometry["y1"])), round(float(geometry["x2"])), round(float(geometry["y2"])))
+    segment = element.metadata.get("segment")
+    if segment and len(segment) == 4:
+        return (int(segment[0]), int(segment[1]), int(segment[2]), int(segment[3]))
+    return None
+
+
+def _element_rect_box(element: Any) -> tuple[float, float, float, float] | None:
+    primitive = next((primitive for primitive in element.primitives if primitive.kind == "rect"), None)
+    if primitive is None:
+        return None
+    geometry = primitive.geometry
+    x = float(geometry["x"])
+    y = float(geometry["y"])
+    return (x, y, x + float(geometry["width"]), y + float(geometry["height"]))
 
 
 def _pin_center(element: Any) -> tuple[int, int]:

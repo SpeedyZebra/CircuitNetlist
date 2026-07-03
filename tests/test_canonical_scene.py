@@ -1,8 +1,9 @@
 from pathlib import Path
+import re
 
 from circuit_netlist import app as app_module
 from circuit_netlist.component_library import load_component_library
-from circuit_netlist.exporters import export_png_placeholder_from_scene
+from circuit_netlist.exporters import export_png_from_scene
 from circuit_netlist.hit_testing import hit_test_point
 from circuit_netlist.parser import NetlistParser
 from circuit_netlist.placement import DeterministicPlacementEngine
@@ -54,6 +55,10 @@ def test_render_circuit_uses_scene_svg_with_stable_existing_markup() -> None:
     assert 'data-scene-version="1.0"' in svg
     assert 'id="component-CHG1"' in svg
     assert 'id="net-VBAT"' in svg
+    scene_ids = re.findall(r'data-scene-id="([^"]+)"', svg)
+    assert scene_ids
+    assert len(scene_ids) == len(set(scene_ids))
+    assert not any("svg" in element.metadata for element in scene.elements)
 
 
 def test_visual_drc_consumes_scene_geometry() -> None:
@@ -78,5 +83,69 @@ def test_scene_endpoint_and_scene_export_helpers(tmp_path: Path) -> None:
     payload = app_module.current_scene_payload()
     assert payload["scene"]["scene_version"] == "1.0"
     scene = SchematicScene.model_validate(payload["scene"])
-    png_path = export_png_placeholder_from_scene(scene, tmp_path / "scene.png")
-    assert "Scene version: 1.0" in png_path.read_text(encoding="utf-8")
+    png_path = export_png_from_scene(scene, tmp_path / "scene.png")
+    data = png_path.read_bytes()
+    assert data.startswith(b"\x89PNG\r\n\x1a\n")
+    from PIL import Image
+
+    with Image.open(png_path) as image:
+        assert image.size == (int(scene.canvas_bounds.width), int(scene.canvas_bounds.height))
+
+
+def test_body_primitive_mutation_controls_svg_and_drc() -> None:
+    _, _, _, _, scene = load_scene()
+    first = scene.first("component-CHG1:body")
+    second = scene.first("component-BAT1:body")
+    assert first is not None and second is not None
+    svg_before = render_scene_svg(scene, [])
+    first.primitives[0].geometry.update(second.primitives[0].geometry)
+    diagnostics, _ = visual_drc_from_scene(scene)
+    svg_after = render_scene_svg(scene, [])
+    assert svg_before != svg_after
+    assert "DRC_COMPONENT_OVERLAP" in [diag.code for diag in diagnostics]
+
+
+def test_wire_primitive_mutation_controls_svg_drc_and_hit_testing() -> None:
+    _, _, _, _, scene = load_scene()
+    wire = scene.elements_by_kind("wire")[0]
+    svg_before = render_scene_svg(scene, [])
+    wire.primitives[0].geometry.update({"x1": 25, "y1": 25, "x2": 225, "y2": 25})
+    svg_after = render_scene_svg(scene, [])
+    assert svg_before != svg_after
+    assert hit_test_point(scene, 125, 25, tolerance=3).id == wire.id
+    _, metrics = visual_drc_from_scene(scene)
+    assert metrics["total_wire_length"] >= 200
+
+
+def test_text_primitive_mutation_and_element_removal_control_svg() -> None:
+    _, _, _, _, scene = load_scene()
+    text_element = scene.first("component-CHG1:ref-label")
+    assert text_element is not None and text_element.text is not None
+    svg_before = render_scene_svg(scene, [])
+    text_element.text.origin.x += 40
+    text_element.primitives[0].geometry["x"] = text_element.text.origin.x
+    assert render_scene_svg(scene, []) != svg_before
+
+    wire = scene.elements_by_kind("wire")[0]
+    scene.elements.remove(wire)
+    svg_removed = render_scene_svg(scene, [])
+    assert wire.id not in svg_removed
+    assert all(item[3] != tuple(wire.primitives[0].geometry[key] for key in ["x1", "y1", "x2", "y2"]) for item in wire_like_segments_from_scene(scene))
+
+
+def test_scene_hit_test_api_returns_ordered_scene_ids() -> None:
+    app_module.load_case(app_module.LoadCaseRequest(case_id="example_solar_led"))
+    payload_scene = app_module.current_scene_payload()["scene"]
+    scene = SchematicScene.model_validate(payload_scene)
+    body = scene.first("component-CHG1:body")
+    assert body is not None
+    payload = app_module.current_scene_hit_test(app_module.HitTestRequest(x=(body.bounds.min_x + body.bounds.max_x) / 2, y=(body.bounds.min_y + body.bounds.max_y) / 2))
+    assert payload["hits"]
+    assert {"scene_id", "kind", "priority"} <= set(payload["hits"][0])
+
+
+def test_scene_builder_does_not_depend_on_legacy_renderer() -> None:
+    source = (ROOT / "src" / "circuit_netlist" / "scene_builder.py").read_text(encoding="utf-8")
+    assert "from .renderer" not in source
+    assert "render_component(" not in source
+    assert '"svg"' not in source

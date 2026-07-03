@@ -1,18 +1,29 @@
 from __future__ import annotations
 
-from html import escape
 from typing import Any
 
 from .component_library import ComponentLibrary
 from .geometry import absolute_pin_point, component_body_box, component_size, inflate_box, symbol_box
 from .models import Circuit, ComponentDefinition, Layout, Placement, RoutedNet
 from .scene import Bounds, LineSegment, Point, RenderPrimitive, SceneElement, SchematicScene, TextGeometry
+from .schematic_geometry import (
+    GROUND_NETS,
+    LabelPlacementContext,
+    choose_ground_symbol_attachment,
+    choose_net_label_position,
+    choose_power_symbol_attachment,
+    component_label_positions,
+    label_flag_path,
+    pin_label_position,
+    power_symbol_box,
+    safe_id,
+    text_box,
+)
+from .symbol_geometry import component_symbol_primitives
 
 
 def build_schematic_scene(circuit: Circuit, library: ComponentLibrary, layout: Layout, routes: list[RoutedNet]) -> SchematicScene:
     """Build the canonical geometry scene shared by rendering, DRC, and hit testing."""
-    from .renderer import LabelPlacementContext
-
     context = LabelPlacementContext(circuit, library, layout, routes)
     elements: list[SceneElement] = []
     for route_index, route in enumerate(routes):
@@ -38,24 +49,10 @@ def build_schematic_scene(circuit: Circuit, library: ComponentLibrary, layout: L
 
 
 def _route_elements(route: RoutedNet, route_index: int, context: Any) -> list[SceneElement]:
-    from .renderer import (
-        choose_ground_symbol_attachment,
-        choose_net_label_position,
-        choose_power_symbol_attachment,
-        label_flag_path,
-        power_symbol_box,
-        render_stub_lines,
-        safe_id,
-        text_box,
-    )
-
     elements: list[SceneElement] = []
     route_id = f"net-{safe_id(route.name)}"
-    parts = [f'<g id="{route_id}" class="net" data-net="{escape(route.name)}" data-render-style="{route.render_style}">']
     for index, segment in enumerate(route.segments):
-        x1, y1, x2, y2 = segment
         svg_id = f"wire-{safe_id(route.name)}-{index}"
-        parts.append(f'<line id="{svg_id}" class="wire" data-net="{escape(route.name)}" x1="{x1}" y1="{y1}" x2="{x2}" y2="{y2}"/>')
         elements.append(
             _segment_element(
                 element_id=f"{route_id}:wire:{index}",
@@ -78,12 +75,23 @@ def _route_elements(route: RoutedNet, route_index: int, context: Any) -> list[Sc
                 context.reserve_stub(segment)
             context.reserve_text(route.name, text_x, text_y, anchor)
             endpoint_id = f"net-label-{safe_id(route.name)}-{index}"
-            parts.append(
-                f'<g id="{endpoint_id}" class="net-label-endpoint" data-net="{escape(route.name)}" data-render-style="net_label">'
-                f'{render_stub_lines(route.name, segments, "label-stub")}'
-                f'<path class="label-flag" d="{label_flag_path(stub_x, stub_y, render_side)}"/>'
-                f'<text class="net-label" data-net="{escape(route.name)}" x="{text_x}" y="{text_y}" text-anchor="{anchor}">{escape(route.name)}</text>'
-                "</g>"
+            flag_bounds = Bounds(min_x=min(stub_x, text_x) - 72, min_y=min(stub_y, text_y) - 24, max_x=max(stub_x, text_x) + 72, max_y=max(stub_y, text_y) + 24)
+            elements.append(
+                SceneElement(
+                    id=endpoint_id,
+                    kind="net_label_endpoint",
+                    layer="wires",
+                    owner_id=route_id,
+                    parent_id=route_id,
+                    net_name=route.name,
+                    bounds=flag_bounds,
+                    collision_bounds=flag_bounds,
+                    hit_bounds=flag_bounds.expanded(4),
+                    primitives=[RenderPrimitive(kind="path", style_class="label-flag", geometry={"d": label_flag_path(stub_x, stub_y, render_side)})],
+                    selectable=True,
+                    z_index=route_index * 100 + 18 + index,
+                    metadata={"render_style": "net_label"},
+                )
             )
             for segment_index, segment in enumerate(segments):
                 elements.append(
@@ -121,38 +129,30 @@ def _route_elements(route: RoutedNet, route_index: int, context: Any) -> list[Sc
             y = int(endpoint["y"])
             side = str(endpoint.get("side", "right"))
             endpoint_id = f"power-symbol-{safe_id(route.name)}-{index}"
-            is_ground = route.name in {"GND", "AGND", "DGND", "PGND"}
+            is_ground = route.name in GROUND_NETS
             if is_ground:
                 stub_segments, symbol_x, symbol_y = choose_ground_symbol_attachment(x, y, side, context)
                 context.reserve_text(route.name, symbol_x, symbol_y + 42, "middle")
-                parts.append(
-                    f'<g id="{endpoint_id}" class="power-symbol ground-symbol" data-net="{escape(route.name)}" data-render-style="power_symbol">'
-                    f'{render_stub_lines(route.name, stub_segments, "power-stub ground-stub")}'
-                    f'<line class="power-shape" x1="{symbol_x}" y1="{symbol_y - 12}" x2="{symbol_x}" y2="{symbol_y}"/>'
-                    f'<line class="power-shape" x1="{symbol_x - 18}" y1="{symbol_y}" x2="{symbol_x + 18}" y2="{symbol_y}"/>'
-                    f'<line class="power-shape" x1="{symbol_x - 12}" y1="{symbol_y + 10}" x2="{symbol_x + 12}" y2="{symbol_y + 10}"/>'
-                    f'<line class="power-shape" x1="{symbol_x - 6}" y1="{symbol_y + 20}" x2="{symbol_x + 6}" y2="{symbol_y + 20}"/>'
-                    f'<text class="net-label ground-label" data-net="{escape(route.name)}" x="{symbol_x}" y="{symbol_y + 42}" text-anchor="middle">{escape(route.name)}</text>'
-                    "</g>"
-                )
                 label_y = symbol_y + 42
                 label_anchor = "middle"
                 symbol_kind = "ground_symbol"
                 stub_class = "power-stub ground-stub"
+                symbol_primitives = [
+                    RenderPrimitive(kind="line", style_class="power-shape", geometry={"x1": symbol_x, "y1": symbol_y - 12, "x2": symbol_x, "y2": symbol_y}),
+                    RenderPrimitive(kind="line", style_class="power-shape", geometry={"x1": symbol_x - 18, "y1": symbol_y, "x2": symbol_x + 18, "y2": symbol_y}),
+                    RenderPrimitive(kind="line", style_class="power-shape", geometry={"x1": symbol_x - 12, "y1": symbol_y + 10, "x2": symbol_x + 12, "y2": symbol_y + 10}),
+                    RenderPrimitive(kind="line", style_class="power-shape", geometry={"x1": symbol_x - 6, "y1": symbol_y + 20, "x2": symbol_x + 6, "y2": symbol_y + 20}),
+                ]
             else:
                 stub_segments, symbol_x, symbol_y = choose_power_symbol_attachment(route.name, x, y, side, context)
                 context.reserve_text(route.name, symbol_x, symbol_y - 24, "middle")
-                parts.append(
-                    f'<g id="{endpoint_id}" class="power-symbol" data-net="{escape(route.name)}" data-render-style="power_symbol">'
-                    f'{render_stub_lines(route.name, stub_segments)}'
-                    f'<path class="power-shape power-flag" d="M {symbol_x - 14} {symbol_y + 12} L {symbol_x} {symbol_y - 8} L {symbol_x + 14} {symbol_y + 12} Z"/>'
-                    f'<text class="net-label power-label" data-net="{escape(route.name)}" x="{symbol_x}" y="{symbol_y - 24}" text-anchor="middle">{escape(route.name)}</text>'
-                    "</g>"
-                )
                 label_y = symbol_y - 24
                 label_anchor = "middle"
                 symbol_kind = "power_symbol"
                 stub_class = "power-stub"
+                symbol_primitives = [
+                    RenderPrimitive(kind="path", style_class="power-shape power-flag", geometry={"d": f"M {symbol_x - 14} {symbol_y + 12} L {symbol_x} {symbol_y - 8} L {symbol_x + 14} {symbol_y + 12} Z"})
+                ]
             for segment in stub_segments:
                 context.reserve_stub(segment)
             for segment_index, segment in enumerate(stub_segments):
@@ -181,9 +181,10 @@ def _route_elements(route: RoutedNet, route_index: int, context: Any) -> list[Sc
                     bounds=Bounds.from_tuple(symbol_bounds),
                     collision_bounds=Bounds.from_tuple(symbol_bounds),
                     hit_bounds=Bounds.from_tuple(symbol_bounds).expanded(8),
-                    primitives=[RenderPrimitive(kind=symbol_kind, geometry={"x": symbol_x, "y": symbol_y})],
+                    primitives=symbol_primitives,
                     z_index=route_index * 100 + 70 + index,
                     metadata={"attachment": True, "source_ref": str(endpoint.get("component_ref", ""))},
+                    selectable=True,
                 )
             )
             label_box = text_box(route.name, symbol_x, label_y, label_anchor)
@@ -204,7 +205,6 @@ def _route_elements(route: RoutedNet, route_index: int, context: Any) -> list[Sc
                 )
             )
     for index, (x, y) in enumerate(route.junctions):
-        parts.append(f'<circle class="junction" data-net="{escape(route.name)}" cx="{x}" cy="{y}" r="4"/>')
         bounds = Bounds(min_x=x - 4, min_y=y - 4, max_x=x + 4, max_y=y + 4)
         elements.append(
             SceneElement(
@@ -217,12 +217,12 @@ def _route_elements(route: RoutedNet, route_index: int, context: Any) -> list[Sc
                 bounds=bounds,
                 collision_bounds=bounds,
                 hit_bounds=bounds.expanded(6),
-                primitives=[RenderPrimitive(kind="circle", geometry={"cx": x, "cy": y, "r": 4})],
+                primitives=[RenderPrimitive(kind="circle", style_class="junction", geometry={"cx": x, "cy": y, "r": 4})],
                 z_index=route_index * 100 + 90 + index,
+                selectable=True,
             )
         )
     for index, (x, y, label) in enumerate(route.labels[:1]):
-        parts.append(f'<text class="net-label" data-net="{escape(route.name)}" x="{x}" y="{y}">{escape(label)}</text>')
         elements.append(
             _text_element(
                 element_id=f"{route_id}:inline-label:{index}",
@@ -239,7 +239,6 @@ def _route_elements(route: RoutedNet, route_index: int, context: Any) -> list[Sc
                 metadata={"text_role": "net_label", "attachment": False},
             )
         )
-    parts.append("</g>")
     route_bounds = _bounds_union([element.bounds for element in elements if element.parent_id == route_id]) or Bounds(min_x=0, min_y=0, max_x=0, max_y=0)
     return [
         SceneElement(
@@ -251,22 +250,18 @@ def _route_elements(route: RoutedNet, route_index: int, context: Any) -> list[Sc
             hit_bounds=route_bounds.expanded(8),
             selectable=True,
             z_index=route_index * 100,
-            metadata={"svg": "".join(parts), "render_style": route.render_style},
+            metadata={"render_style": route.render_style},
         ),
         *elements,
     ]
 
 
 def _component_elements(ref: str, definition: ComponentDefinition, placement: Placement, component_index: int) -> list[SceneElement]:
-    from .renderer import component_label_positions, default_registry, pin_label_position, safe_id, text_box
-
     elements: list[SceneElement] = []
     group_id = f"component-{safe_id(ref)}"
     body_box = component_body_box(definition, placement)
     physical_symbol_box = symbol_box(definition, placement)
     width, height = component_size(definition, placement)
-    registry = default_registry()
-    component_svg = registry.render_component(ref, definition, placement)
     body_bounds = Bounds.from_tuple(body_box)
     symbol_bounds = Bounds.from_tuple(physical_symbol_box)
     group_bounds = body_bounds.expanded(24)
@@ -284,7 +279,6 @@ def _component_elements(ref: str, definition: ComponentDefinition, placement: Pl
             selectable=True,
             z_index=component_index * 100,
             metadata={
-                "svg": component_svg,
                 "renderer": definition.body.renderer,
                 "category": definition.category,
                 "rotation": placement.rotation,
@@ -303,8 +297,9 @@ def _component_elements(ref: str, definition: ComponentDefinition, placement: Pl
             bounds=body_bounds,
             collision_bounds=body_bounds,
             hit_bounds=body_bounds.expanded(8),
-            primitives=[RenderPrimitive(kind="rect", geometry={"x": placement.x, "y": placement.y, "width": width, "height": height})],
+            primitives=[RenderPrimitive(kind="rect", style_class=_body_css_class(definition), geometry={"x": placement.x, "y": placement.y, "width": width, "height": height, "rx": 6 if definition.body.renderer in {"dip_ic", "timer_555"} else 4})],
             z_index=component_index * 100 + 1,
+            selectable=True,
         )
     )
     elements.append(
@@ -318,8 +313,9 @@ def _component_elements(ref: str, definition: ComponentDefinition, placement: Pl
             bounds=symbol_bounds,
             collision_bounds=Bounds.from_tuple(inflate_box(physical_symbol_box, 10)),
             hit_bounds=symbol_bounds.expanded(8),
-            primitives=[RenderPrimitive(kind="symbol_bounds", geometry={"renderer": definition.body.renderer})],
+            primitives=component_symbol_primitives(definition, placement),
             z_index=component_index * 100 + 2,
+            metadata={"renderer": definition.body.renderer},
         )
     )
     ref_x, ref_y, ref_anchor, value_x, value_y, value_anchor = component_label_positions(definition, placement)
@@ -374,8 +370,9 @@ def _component_elements(ref: str, definition: ComponentDefinition, placement: Pl
                 bounds=pin_bounds,
                 collision_bounds=pin_bounds,
                 hit_bounds=pin_bounds.expanded(8),
-                primitives=[RenderPrimitive(kind="circle", geometry={"cx": pin_x, "cy": pin_y, "r": 4})],
+                primitives=[RenderPrimitive(kind="circle", style_class="pin-dot", geometry={"cx": pin_x, "cy": pin_y, "r": 4})],
                 z_index=component_index * 100 + 20 + pin_index,
+                selectable=True,
                 metadata={"electrical_type": pin.electrical_type.value, "side": pin.side},
             )
         )
@@ -456,8 +453,9 @@ def _segment_element(
         net_name=route.name,
         bounds=bounds,
         hit_bounds=bounds.expanded(6),
-        primitives=[RenderPrimitive(kind="line", geometry={"x1": segment[0], "y1": segment[1], "x2": segment[2], "y2": segment[3]})],
+        primitives=[RenderPrimitive(kind="line", style_class=_wire_css_class(wire_kind, metadata), geometry={"x1": segment[0], "y1": segment[1], "x2": segment[2], "y2": segment[3]})],
         z_index=z_index,
+        selectable=True,
         metadata=all_metadata,
     )
 
@@ -496,10 +494,38 @@ def _text_element(
         collision_bounds=text_bounds,
         hit_bounds=text_bounds.expanded(4),
         text=TextGeometry(text=text, origin=Point(x=x, y=y), anchor=anchor, bounds=text_bounds),
-        primitives=[RenderPrimitive(kind="text", geometry={"x": x, "y": y, "anchor": anchor})],
+        primitives=[RenderPrimitive(kind="text", style_class=_text_css_class(kind), geometry={"x": x, "y": y, "anchor": anchor, "text": text})],
         z_index=z_index,
         metadata={"drc_wire_text": True, **(metadata or {})},
     )
+
+
+def _text_css_class(kind: str) -> str:
+    return {
+        "component_reference_text": "ref-label",
+        "component_value_text": "value-label",
+        "pin_number_text": "pin-number",
+        "pin_name_text": "pin-name",
+        "ground_label": "net-label ground-label",
+        "power_label": "net-label power-label",
+        "net_label": "net-label",
+    }.get(kind, "net-label")
+
+
+def _wire_css_class(wire_kind: str, metadata: dict[str, Any] | None) -> str:
+    if metadata and metadata.get("css_class"):
+        return f"wire {metadata['css_class']}"
+    if wire_kind == "label-stub":
+        return "wire label-stub"
+    return "wire"
+
+
+def _body_css_class(definition: ComponentDefinition) -> str:
+    if definition.body.renderer == "timer_555":
+        return "body ic-body timer-555-body"
+    if definition.body.renderer == "dip_ic":
+        return "body ic-body"
+    return "body"
 
 
 def _bounds_union(bounds: list[Bounds]) -> Bounds | None:
