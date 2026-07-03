@@ -3,7 +3,8 @@ from __future__ import annotations
 from pathlib import Path
 
 from circuit_netlist.component_library import load_component_library
-from circuit_netlist.constraint_placement import ConstraintPlacementOptimizer, PlacementOptimizationConfig, PlacementScorer
+from circuit_netlist.constraint_placement import ConstraintPlacementOptimizer, PlacementOptimizationConfig, PlacementScorer, _diagnostic_counts
+from circuit_netlist.erc import ElectricalRuleChecker
 from circuit_netlist.models import Circuit, ComponentInstance, Layout, Net, PinRef, Placement
 from circuit_netlist.parser import NetlistParser
 from circuit_netlist.placement import DeterministicPlacementEngine
@@ -215,7 +216,9 @@ def test_strong_topology_groups_remain_intact_when_only_soft_constraints_exist()
     result = ConstraintPlacementOptimizer().optimize(circuit, lib, initial, analysis)
 
     assert result.comparison.initial_score.hard_violation_count == 0
-    assert result.optimized_layout.components == initial.components
+    assert result.comparison.optimized_evaluation is not None
+    assert result.comparison.optimized_evaluation.valid
+    assert result.comparison.optimized_evaluation.final_score <= result.comparison.initial_evaluation.final_score
     for pattern in analysis.patterns_by_type(PatternType.LOW_SIDE_MOSFET_SWITCH):
         refs = sorted(pattern.component_refs)
         anchor = refs[0]
@@ -273,3 +276,372 @@ NET A:
     original_delta = original_layout.components["R2"].x - original_layout.components["R1"].x, original_layout.components["R2"].y - original_layout.components["R1"].y
     renamed_delta = renamed_layout.components["RB"].x - renamed_layout.components["RA"].x, renamed_layout.components["RB"].y - renamed_layout.components["RA"].y
     assert original_delta == renamed_delta
+
+
+def test_route_validated_candidate_introducing_wire_symbol_overlap_is_rejected() -> None:
+    lib = library()
+    circuit = parse_text((ROOT / "examples" / "solar_led.cnet").read_text(encoding="utf-8"))
+    analysis = TopologyAnalyzer().analyze(circuit, lib)
+    initial = DeterministicPlacementEngine(optimization_config=PlacementOptimizationConfig(mode="off")).place(circuit, lib)
+    optimizer = ConstraintPlacementOptimizer(PlacementOptimizationConfig(mode="score_only"))
+    baseline = optimizer.evaluate_layout(circuit, lib, initial, analysis, initial_layout=initial)
+    assert [diag.code for diag in baseline.visual_diagnostics] == []
+
+    candidate = initial.model_copy(deep=True)
+    candidate.components["U1"].x = 480
+    candidate_score = optimizer.scorer.score(circuit, lib, candidate, analysis, fixed_layout=initial)
+    evaluation = optimizer.evaluate_layout(circuit, lib, candidate, analysis, candidate_score, baseline_counts=_diagnostic_counts(baseline.visual_diagnostics), initial_layout=initial)
+
+    assert evaluation.valid is False
+    assert "NEW_VISUAL_DRC" in evaluation.rejection_reasons
+    assert "DRC_WIRE_SYMBOL_OVERLAP" in [diag.code for diag in evaluation.unexpected_visual_diagnostics]
+
+
+def test_route_validated_candidate_with_component_overlap_is_rejected() -> None:
+    lib = library()
+    circuit = two_resistors()
+    initial = layout_at({"R1": (100, 100), "R2": (360, 100)})
+    optimizer = ConstraintPlacementOptimizer(PlacementOptimizationConfig(mode="score_only"))
+    analysis = TopologyAnalyzer().analyze(circuit, lib)
+    baseline = optimizer.evaluate_layout(circuit, lib, initial, analysis, initial_layout=initial)
+
+    candidate = layout_at({"R1": (100, 100), "R2": (100, 100)})
+    candidate_score = optimizer.scorer.score(circuit, lib, candidate, analysis, fixed_layout=initial)
+    evaluation = optimizer.evaluate_layout(circuit, lib, candidate, analysis, candidate_score, baseline_counts=_diagnostic_counts(baseline.visual_diagnostics), initial_layout=initial)
+
+    assert evaluation.valid is False
+    assert "HARD_CONSTRAINT_VIOLATION" in evaluation.rejection_reasons
+
+
+def test_route_validated_candidate_with_routing_failure_is_rejected() -> None:
+    lib = library()
+    circuit = two_resistors()
+    initial = layout_at({"R1": (100, 100), "R2": (360, 100)})
+    missing = Layout(components={"R1": Placement(x=100, y=100)}, canvas={"grid": 40, "width": 800, "height": 600})
+    optimizer = ConstraintPlacementOptimizer(PlacementOptimizationConfig(mode="score_only"))
+    analysis = TopologyAnalyzer().analyze(circuit, lib)
+    baseline = optimizer.evaluate_layout(circuit, lib, initial, analysis, initial_layout=initial)
+    evaluation = optimizer.evaluate_layout(circuit, lib, missing, analysis, baseline_counts=_diagnostic_counts(baseline.visual_diagnostics), initial_layout=initial)
+
+    assert evaluation.valid is False
+    assert evaluation.routing_succeeded is False
+    assert "ROUTING_FAILED" in evaluation.rejection_reasons
+
+
+def test_soft_optimization_uses_actual_routed_metrics_and_preserves_visual_drc() -> None:
+    lib = library()
+    circuit = parse_text((ROOT / "examples" / "555_timer_50_duty_astable.cnet").read_text(encoding="utf-8"))
+    analysis = TopologyAnalyzer().analyze(circuit, lib)
+    initial = DeterministicPlacementEngine(optimization_config=PlacementOptimizationConfig(mode="off")).place(circuit, lib)
+    result = ConstraintPlacementOptimizer().optimize(circuit, lib, initial, analysis)
+
+    assert result.comparison.route_validations > 0
+    assert result.comparison.optimized_evaluation.valid
+    assert [diag.code for diag in result.comparison.optimized_evaluation.visual_diagnostics] == []
+    assert result.comparison.optimized_evaluation.final_score <= result.comparison.initial_evaluation.final_score
+    assert result.comparison.optimized_evaluation.total_routed_length <= result.comparison.initial_evaluation.total_routed_length
+
+
+def test_soft_optimization_no_worse_for_known_risky_circuits() -> None:
+    for relative in [
+        "test_circuits/good/04_repeated_groups/multi_mosfet_4_channel.cnet",
+        "test_circuits/good/04_repeated_groups/multi_decoupling_with_rc_filters.cnet",
+        "examples/solar_led.cnet",
+    ]:
+        lib = library()
+        circuit, diagnostics = NetlistParser().parse_file(ROOT / relative)
+        assert circuit is not None, diagnostics
+        analysis = TopologyAnalyzer().analyze(circuit, lib)
+        initial = DeterministicPlacementEngine(optimization_config=PlacementOptimizationConfig(mode="off")).place(circuit, lib)
+        result = ConstraintPlacementOptimizer().optimize(circuit, lib, initial, analysis)
+        baseline_codes = sorted(diag.code for diag in result.comparison.initial_evaluation.visual_diagnostics if diag.code)
+        optimized_codes = sorted(diag.code for diag in result.comparison.optimized_evaluation.visual_diagnostics if diag.code)
+        assert optimized_codes == baseline_codes
+        assert result.comparison.optimized_evaluation.final_score <= result.comparison.initial_evaluation.final_score
+
+
+def test_hard_only_clean_layout_uses_fast_path() -> None:
+    lib = library()
+    circuit = two_resistors()
+    initial = layout_at({"R1": (100, 100), "R2": (360, 100)})
+    result = ConstraintPlacementOptimizer(PlacementOptimizationConfig(optimize_soft_constraints=False)).optimize(circuit, lib, initial)
+
+    assert result.optimized_layout.components == initial.components
+    assert result.comparison.fast_path == "hard_only_clean_layout"
+    assert result.comparison.candidate_evaluations == 0
+    assert result.comparison.route_validations == 0
+
+
+def test_all_locked_layout_uses_no_movable_fast_path() -> None:
+    lib = library()
+    circuit = two_resistors()
+    initial = layout_at({"R1": (100, 100), "R2": (360, 100)}, locked={"R1", "R2"})
+    result = ConstraintPlacementOptimizer().optimize(circuit, lib, initial)
+
+    assert result.comparison.fast_path == "no_movable_components"
+    assert result.optimized_layout.components == initial.components
+
+
+def test_route_validation_budget_exhaustion_returns_best_valid_layout() -> None:
+    lib = library()
+    circuit = parse_text((ROOT / "examples" / "555_timer_50_duty_astable.cnet").read_text(encoding="utf-8"))
+    analysis = TopologyAnalyzer().analyze(circuit, lib)
+    initial = DeterministicPlacementEngine(optimization_config=PlacementOptimizationConfig(mode="off")).place(circuit, lib)
+    result = ConstraintPlacementOptimizer(PlacementOptimizationConfig(max_total_route_validations=1, max_route_validations_per_pass=1)).optimize(circuit, lib, initial, analysis)
+
+    assert result.comparison.budget_reached
+    assert result.comparison.budget_reason in {"MAX_ROUTE_VALIDATIONS", "MAX_ROUTE_VALIDATIONS_PER_PASS"}
+    assert result.comparison.optimized_evaluation.valid
+
+
+def test_conservative_orientation_optimization_for_loose_two_pin_passives() -> None:
+    lib = library()
+    circuit = two_resistors()
+    analysis = TopologyAnalyzer().analyze(circuit, lib)
+    initial = layout_at({"R1": (100, 100), "R2": (100, 360)})
+    result = ConstraintPlacementOptimizer(PlacementOptimizationConfig(candidate_radii=(), max_total_route_validations=10)).optimize(circuit, lib, initial, analysis)
+
+    assert result.optimized_layout.components["R1"].rotation == 90
+    assert result.optimized_layout.components["R2"].rotation == 90
+    assert result.comparison.optimized_evaluation.total_routed_length < result.comparison.initial_evaluation.total_routed_length
+
+
+def test_strong_topology_orientation_is_preserved() -> None:
+    lib = library()
+    circuit = parse_text((ROOT / "examples" / "solar_led.cnet").read_text(encoding="utf-8"))
+    layout = DeterministicPlacementEngine().place(circuit, lib)
+
+    assert layout.components["R_BAT_TOP"].rotation == 90
+    assert layout.components["R_BAT_BOT"].rotation == 90
+    assert layout.components["R_GATE"].rotation == 0
+    assert layout.components["C1"].rotation == 90
+
+
+def test_optimizer_preserves_expected_electrical_diagnostics_and_connectivity() -> None:
+    lib = library()
+    circuit = parse_text("""CIRCUIT ReversedLed
+COMPONENT V1 POWER_DC_SOURCE voltage=5V
+COMPONENT R1 BASIC_RESISTOR value=330ohm role=current_limit
+COMPONENT LED1 LIGHT_LED_RED
+
+NET VCC:
+    V1.POS
+    R1.1
+
+NET LED_NODE:
+    R1.2
+    LED1.K
+
+NET GND:
+    V1.NEG
+    LED1.A
+""")
+    initial_erc = [diag.code for diag in ElectricalRuleChecker(lib).check(circuit)]
+    before_signature = [(net.name, sorted((pin.component_ref, pin.pin_name) for pin in net.pins)) for net in circuit.nets]
+    layout = DeterministicPlacementEngine().place(circuit, lib)
+    after_signature = [(net.name, sorted((pin.component_ref, pin.pin_name) for pin in net.pins)) for net in circuit.nets]
+    final_erc = [diag.code for diag in ElectricalRuleChecker(lib).check(circuit)]
+
+    assert "ERC_LED_POLARITY_REVERSED" in initial_erc
+    assert final_erc == initial_erc
+    assert after_signature == before_signature
+    assert layout.components
+
+
+def two_controller_text() -> str:
+    return """CIRCUIT TwoControllers
+COMPONENT V1 POWER_DC_SOURCE voltage=5V role=source
+COMPONENT U1 MCU_ATtiny402_SOIC8 role=controller
+COMPONENT U2 BASIC_555_TIMER role=controller
+COMPONENT R_LED1 BASIC_RESISTOR value=220ohm role=current_limit
+COMPONENT D1 LIGHT_LED_RED
+COMPONENT R_GATE1 BASIC_RESISTOR value=100ohm role=gate_resistor
+COMPONENT R_PULL1 BASIC_RESISTOR value=100kohm role=pulldown
+COMPONENT Q1 BASIC_NMOS role=low_side_switch
+COMPONENT R_LED2 BASIC_RESISTOR value=220ohm role=current_limit
+COMPONENT D2 LIGHT_LED_GREEN
+COMPONENT R_GATE2 BASIC_RESISTOR value=100ohm role=gate_resistor
+COMPONENT R_PULL2 BASIC_RESISTOR value=100kohm role=pulldown
+COMPONENT Q2 BASIC_NMOS role=low_side_switch
+
+NET VCC:
+    V1.POS
+    U1.VDD
+    U2.VCC
+    U2.RESET
+    R_LED1.1
+    R_LED2.1
+
+NET A_NODE:
+    R_LED1.2
+    D1.A
+
+NET A_SWITCH:
+    D1.K
+    Q1.D
+
+NET A_CTRL:
+    U1.PA7
+    R_GATE1.1
+
+NET A_GATE:
+    R_GATE1.2
+    R_PULL1.1
+    Q1.G
+
+NET B_NODE:
+    R_LED2.2
+    D2.A
+
+NET B_SWITCH:
+    D2.K
+    Q2.D
+
+NET B_CTRL:
+    U2.OUT
+    R_GATE2.1
+
+NET B_GATE:
+    R_GATE2.2
+    R_PULL2.1
+    Q2.G
+
+NET TIMER_TIMING:
+    U2.TRIG
+    U2.THRESH
+
+NET TIMER_CTRL [allow_single]:
+    U2.CTRL
+
+NET GND:
+    V1.NEG
+    U1.GND
+    U2.GND
+    R_PULL1.2
+    Q1.S
+    R_PULL2.2
+    Q2.S
+"""
+
+
+def test_two_real_controllers_driving_separate_channels_are_route_validated() -> None:
+    lib = library()
+    circuit = parse_text(two_controller_text())
+    analysis = TopologyAnalyzer().analyze(circuit, lib)
+    layout = DeterministicPlacementEngine().place(circuit, lib)
+    layout_again = DeterministicPlacementEngine().place(circuit, lib)
+    routes = ManhattanRouter().route(circuit, lib, layout)
+    diagnostics, metrics = visual_drc(circuit, lib, layout, routes)
+
+    assert layout.model_dump(mode="json") == layout_again.model_dump(mode="json")
+    assert layout.components["U1"] != layout.components["U2"]
+    assert metrics["component_body_overlaps"] == 0
+    assert not [diag for diag in diagnostics if diag.severity in {"ERROR", "FATAL"}]
+    assert analysis.component_roles["U1"].value == "controller"
+    assert analysis.component_roles["U2"].value == "controller"
+
+
+def test_three_controllers_sharing_supply_rails_do_not_collapse() -> None:
+    text = """CIRCUIT ThreeControllers
+COMPONENT V1 POWER_DC_SOURCE voltage=5V role=source
+COMPONENT U1 MCU_ATtiny402_SOIC8 role=controller
+COMPONENT U2 MCU_ATtiny402_SOIC8 role=controller
+COMPONENT U3 MCU_ATtiny402_SOIC8 role=controller
+COMPONENT R_LED1 BASIC_RESISTOR value=220ohm role=current_limit
+COMPONENT D1 LIGHT_LED_RED
+COMPONENT R_GATE1 BASIC_RESISTOR value=100ohm role=gate_resistor
+COMPONENT R_PULL1 BASIC_RESISTOR value=100kohm role=pulldown
+COMPONENT Q1 BASIC_NMOS role=low_side_switch
+COMPONENT R_LED2 BASIC_RESISTOR value=220ohm role=current_limit
+COMPONENT D2 LIGHT_LED_GREEN
+COMPONENT R_GATE2 BASIC_RESISTOR value=100ohm role=gate_resistor
+COMPONENT R_PULL2 BASIC_RESISTOR value=100kohm role=pulldown
+COMPONENT Q2 BASIC_NMOS role=low_side_switch
+COMPONENT R_LED3 BASIC_RESISTOR value=220ohm role=current_limit
+COMPONENT D3 LIGHT_LED_BLUE
+COMPONENT R_GATE3 BASIC_RESISTOR value=100ohm role=gate_resistor
+COMPONENT R_PULL3 BASIC_RESISTOR value=100kohm role=pulldown
+COMPONENT Q3 BASIC_NMOS role=low_side_switch
+
+NET VCC:
+    V1.POS
+    U1.VDD
+    U2.VDD
+    U3.VDD
+    R_LED1.1
+    R_LED2.1
+    R_LED3.1
+
+NET A_NODE:
+    R_LED1.2
+    D1.A
+
+NET A_SWITCH:
+    D1.K
+    Q1.D
+
+NET A_CTRL:
+    U1.PA7
+    R_GATE1.1
+
+NET A_GATE:
+    R_GATE1.2
+    R_PULL1.1
+    Q1.G
+
+NET B_NODE:
+    R_LED2.2
+    D2.A
+
+NET B_SWITCH:
+    D2.K
+    Q2.D
+
+NET B_CTRL:
+    U2.PA7
+    R_GATE2.1
+
+NET B_GATE:
+    R_GATE2.2
+    R_PULL2.1
+    Q2.G
+
+NET C_NODE:
+    R_LED3.2
+    D3.A
+
+NET C_SWITCH:
+    D3.K
+    Q3.D
+
+NET C_CTRL:
+    U3.PA7
+    R_GATE3.1
+
+NET C_GATE:
+    R_GATE3.2
+    R_PULL3.1
+    Q3.G
+
+NET GND:
+    V1.NEG
+    U1.GND
+    U2.GND
+    U3.GND
+    R_PULL1.2
+    Q1.S
+    R_PULL2.2
+    Q2.S
+    R_PULL3.2
+    Q3.S
+"""
+    lib = library()
+    circuit = parse_text(text)
+    layout = DeterministicPlacementEngine().place(circuit, lib)
+    controller_positions = {(layout.components[ref].x, layout.components[ref].y) for ref in ["U1", "U2", "U3"]}
+    routes = ManhattanRouter().route(circuit, lib, layout)
+    diagnostics, metrics = visual_drc(circuit, lib, layout, routes)
+
+    assert len(controller_positions) == 3
+    assert metrics["component_body_overlaps"] == 0
+    assert not [diag for diag in diagnostics if diag.severity in {"ERROR", "FATAL"}]

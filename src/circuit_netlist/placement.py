@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 from typing import Protocol
 
 from .component_library import ComponentLibrary
-from .constraint_placement import ConstraintPlacementOptimizer, PlacementOptimizationConfig, PlacementOptimizationResult, PlacementScore
+from .constraint_placement import ConstraintPlacementOptimizer, PlacementOptimizationConfig, PlacementOptimizationResult, PlacementScore, RoutedLayoutEvaluation
 from .geometry import component_size
 from .models import Circuit, ComponentInstance, Layout, Placement
 from .topology import ComponentRole, MIN_PLACEMENT_PATTERN_CONFIDENCE, PatternType, TopologyAnalysis, TopologyAnalyzer, TopologyPattern
@@ -144,10 +144,17 @@ class DeterministicPlacementEngine:
             "optimize_soft_constraints": self.optimization_config.optimize_soft_constraints,
             "passes": comparison.passes,
             "candidate_evaluations": comparison.candidate_evaluations,
+            "route_validations": comparison.route_validations,
+            "rejected_candidates": len([report for report in comparison.candidate_reports if not report.get("accepted")]),
             "budget_reached": comparison.budget_reached,
+            "budget_reason": comparison.budget_reason,
+            "fast_path": comparison.fast_path,
             "initial": self._score_metadata(comparison.initial_score),
             "optimized": self._score_metadata(comparison.optimized_score),
+            "initial_routed": self._evaluation_metadata(comparison.initial_evaluation),
+            "optimized_routed": self._evaluation_metadata(comparison.optimized_evaluation),
             "moves": comparison.moves,
+            "candidate_reports": [self._candidate_metadata(report) for report in comparison.candidate_reports],
         }
 
     def _score_metadata(self, score: PlacementScore) -> dict[str, object]:
@@ -169,6 +176,32 @@ class DeterministicPlacementEngine:
                 for violation in score.violations
             ],
         }
+
+    def _evaluation_metadata(self, evaluation: RoutedLayoutEvaluation | None) -> dict[str, object] | None:
+        if evaluation is None:
+            return None
+        return {
+            "validation_level": evaluation.validation_level.value,
+            "valid": evaluation.valid,
+            "routing_succeeded": evaluation.routing_succeeded,
+            "final_score": round(float(evaluation.final_score), 6),
+            "route_count": evaluation.route_count,
+            "total_routed_length": evaluation.total_routed_length,
+            "total_bend_count": evaluation.total_bend_count,
+            "wire_segment_count": evaluation.wire_segment_count,
+            "max_net_length": evaluation.max_net_length,
+            "average_net_length": evaluation.average_net_length,
+            "scene_bounds": evaluation.scene_bounds.model_dump(mode="json"),
+            "page_area": evaluation.page_area,
+            "aspect_ratio": evaluation.aspect_ratio,
+            "visual_diagnostic_codes": sorted(diag.code for diag in evaluation.visual_diagnostics if diag.code),
+            "unexpected_visual_diagnostic_codes": sorted(diag.code for diag in evaluation.unexpected_visual_diagnostics if diag.code),
+            "rejection_reasons": evaluation.rejection_reasons,
+            "metrics": evaluation.metrics,
+        }
+
+    def _candidate_metadata(self, report: dict[str, object]) -> dict[str, object]:
+        return {key: value for key, value in report.items() if key != "validation_time_ms"}
 
     def _place_by_role(self, circuit: Circuit, library: ComponentLibrary, layout: Layout, analysis: TopologyAnalysis) -> None:
         columns: dict[str, list[str]] = {"source": [], "power": [], "storage": [], "controller": [], "switch": [], "load": [], "passive": []}
@@ -240,6 +273,7 @@ class DeterministicPlacementEngine:
 
     def _place_low_side_switches(self, circuit: Circuit, library: ComponentLibrary, layout: Layout, analysis: TopologyAnalysis) -> None:
         lane_y = 260
+        placed_drivers: set[str] = set()
         for lane, pattern in enumerate(self._strong_patterns(analysis, PatternType.LOW_SIDE_MOSFET_SWITCH)):
             mosfet = str(pattern.metadata.get("mosfet", ""))
             if not mosfet:
@@ -275,8 +309,9 @@ class DeterministicPlacementEngine:
                 origin_y = lane_y
             self._place_envelope(layout, envelope, origin_x, origin_y)
             lane_y = self._snap(int(lane_y + envelope.height + GROUP_CLEARANCE_Y))
-            if driver:
-                self._set(layout, driver, 560, 420, 0)
+            if driver and driver not in placed_drivers:
+                self._set(layout, driver, 560, origin_y + 160, 0)
+                placed_drivers.add(driver)
 
     def _place_voltage_dividers(self, circuit: Circuit, library: ComponentLibrary, layout: Layout, analysis: TopologyAnalysis) -> None:
         patterns = self._strong_patterns(analysis, PatternType.VOLTAGE_DIVIDER)

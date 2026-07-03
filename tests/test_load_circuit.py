@@ -123,6 +123,9 @@ def test_placement_score_endpoint_returns_current_optimizer_summary() -> None:
     assert payload["layout_available"] is True
     assert payload["placement_optimizer"]["mode"] == "optimize"
     assert payload["placement_optimizer"]["optimized"]["hard_violation_count"] == 0
+    assert "optimized_routed" in payload["placement_optimizer"]
+    assert "route_validations" in payload["placement_optimizer"]
+    assert payload["placement_optimizer"]["optimized_routed"]["routing_succeeded"] is True
 
 
 def test_regression_expected_summary_for_good_and_fault_cases() -> None:

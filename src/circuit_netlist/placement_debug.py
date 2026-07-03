@@ -53,7 +53,9 @@ def main(argv: list[str] | None = None) -> int:
         grid=args.grid,
         max_passes=args.max_passes,
         max_total_evaluations=args.max_evaluations,
-        optimize_soft_constraints=args.optimize_soft,
+        max_total_route_validations=args.max_route_validations,
+        max_optimization_time_ms=args.max_time_ms,
+        optimize_soft_constraints=not args.hard_only,
     )
     result = ConstraintPlacementOptimizer(config).optimize(circuit, library, initial_layout, analysis, fixed_refs=fixed_refs)
     optimized_layout = result.optimized_layout
@@ -78,6 +80,9 @@ def main(argv: list[str] | None = None) -> int:
     print(f"Initial score: {result.comparison.initial_score.total:.2f}")
     print(f"Optimized score: {result.comparison.optimized_score.total:.2f}")
     print(f"Hard violations: {result.comparison.initial_score.hard_violation_count} -> {result.comparison.optimized_score.hard_violation_count}")
+    if result.comparison.initial_evaluation and result.comparison.optimized_evaluation:
+        print(f"Routed score: {result.comparison.initial_evaluation.final_score:.2f} -> {result.comparison.optimized_evaluation.final_score:.2f}")
+        print(f"Route validations: {result.comparison.route_validations}")
     return 0
 
 
@@ -91,7 +96,9 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser.add_argument("--grid", type=int, default=40)
     parser.add_argument("--max-passes", type=int, default=4)
     parser.add_argument("--max-evaluations", type=int, default=600)
-    parser.add_argument("--optimize-soft", action="store_true", help="Allow soft-constraint improvements after hard violations are resolved.")
+    parser.add_argument("--max-route-validations", type=int, default=24)
+    parser.add_argument("--max-time-ms", type=int, default=900)
+    parser.add_argument("--hard-only", action="store_true", help="Disable route-validated soft improvements and only repair hard placement violations.")
     return parser.parse_args(argv)
 
 
@@ -120,7 +127,19 @@ def _comparison_text(comparison: dict[str, object]) -> str:
             f"Hard violations: {initial['hard_violation_count']} -> {optimized['hard_violation_count']}",
             f"Passes: {comparison['passes']}",
             f"Candidate evaluations: {comparison['candidate_evaluations']}",
+            f"Route validations: {comparison['route_validations']}",
             f"Budget reached: {comparison['budget_reached']}",
+            f"Budget reason: {comparison.get('budget_reason')}",
+            f"Fast path: {comparison.get('fast_path')}",
+            "",
+            "Initial routed evaluation:",
+            json.dumps(comparison.get("initial_evaluation"), indent=2),
+            "",
+            "Optimized routed evaluation:",
+            json.dumps(comparison.get("optimized_evaluation"), indent=2),
+            "",
+            "Candidate reports:",
+            json.dumps(comparison.get("candidate_reports"), indent=2),
             "",
             "Moves:",
             json.dumps(comparison["moves"], indent=2),

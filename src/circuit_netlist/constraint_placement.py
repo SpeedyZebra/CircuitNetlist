@@ -1,19 +1,29 @@
 from __future__ import annotations
 
+from collections import Counter
 from dataclasses import asdict, dataclass, field
 from enum import Enum
 from time import perf_counter
-from typing import Iterable
+from typing import Any, Iterable
 
 from .component_library import ComponentLibrary
-from .geometry import absolute_pin_point, boxes_overlap, component_body_box, component_size, inflate_box, visual_pin_side
-from .models import Circuit, Layout, Placement
+from .geometry import absolute_pin_point, boxes_overlap, component_body_box, component_size, inflate_box, is_orientation_sensitive, segment_crosses_box, segments_collinear_overlap, visual_pin_side
+from .models import Circuit, Diagnostic, Layout, Placement, Severity
+from .router import ManhattanRouter
+from .scene import Bounds, SchematicScene
+from .scene_builder import build_schematic_scene
 from .topology import ComponentRole, MIN_PLACEMENT_PATTERN_CONFIDENCE, PatternType, TopologyAnalysis, TopologyAnalyzer, TopologyPattern
 
 
 class ConstraintSeverity(str, Enum):
     HARD = "hard"
     SOFT = "soft"
+
+
+class CandidateValidationLevel(str, Enum):
+    GEOMETRY_ONLY = "geometry_only"
+    ROUTED = "routed"
+    SCENE_VALIDATED = "scene_validated"
 
 
 @dataclass(frozen=True)
@@ -52,18 +62,41 @@ DEFAULT_PLACEMENT_WEIGHTS = PlacementWeights()
 
 
 @dataclass(frozen=True)
+class RoutedLayoutWeights:
+    visual_drc_penalty: float = 1_000_000.0
+    routing_failure_penalty: float = 1_000_000.0
+    actual_wire_length_weight: float = 1.0
+    actual_bend_weight: float = 60.0
+    max_net_length_weight: float = 0.2
+    page_area_weight: float = 0.0005
+    aspect_ratio_weight: float = 280.0
+    displacement_weight: float = 0.1
+    orientation_change_weight: float = 160.0
+
+
+DEFAULT_ROUTED_LAYOUT_WEIGHTS = RoutedLayoutWeights()
+
+
+@dataclass(frozen=True)
 class PlacementOptimizationConfig:
     mode: str = "optimize"
     grid: int = 40
-    max_passes: int = 4
+    max_passes: int = 2
     max_candidates_per_unit: int = 25
     max_total_evaluations: int = 600
+    max_prefilter_candidates: int = 4
+    max_route_validations_per_pass: int = 2
+    max_total_route_validations: int = 6
+    max_optimization_time_ms: int = 300
     candidate_radii: tuple[int, ...] = (2, 4, 6)
     minimum_component_clearance: int = 24
     preferred_aspect_min: float = 1.0
     preferred_aspect_max: float = 1.8
-    optimize_soft_constraints: bool = False
+    optimize_soft_constraints: bool = True
+    enable_orientation_candidates: bool = True
+    min_final_score_improvement: float = 1.0
     weights: PlacementWeights = DEFAULT_PLACEMENT_WEIGHTS
+    routed_weights: RoutedLayoutWeights = DEFAULT_ROUTED_LAYOUT_WEIGHTS
 
 
 @dataclass(frozen=True)
@@ -94,14 +127,70 @@ class PlacementScore:
 
 
 @dataclass(frozen=True)
+class RoutedLayoutEvaluation:
+    placement_score: PlacementScore
+    validation_level: CandidateValidationLevel
+    routing_succeeded: bool
+    route_count: int
+    total_routed_length: float
+    total_bend_count: int
+    wire_segment_count: int
+    net_count: int
+    max_net_length: float
+    average_net_length: float
+    scene_bounds: Bounds
+    page_area: float
+    aspect_ratio: float
+    component_utilization_ratio: float
+    visual_diagnostics: list[Diagnostic]
+    unexpected_visual_diagnostics: list[Diagnostic]
+    expected_visual_diagnostics: list[Diagnostic]
+    valid: bool
+    final_score: float
+    rejection_reasons: list[str]
+    metrics: dict[str, float]
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "placement_score": self.placement_score.to_dict(),
+            "validation_level": self.validation_level.value,
+            "routing_succeeded": self.routing_succeeded,
+            "route_count": self.route_count,
+            "total_routed_length": self.total_routed_length,
+            "total_bend_count": self.total_bend_count,
+            "wire_segment_count": self.wire_segment_count,
+            "net_count": self.net_count,
+            "max_net_length": self.max_net_length,
+            "average_net_length": self.average_net_length,
+            "scene_bounds": self.scene_bounds.model_dump(mode="json"),
+            "page_area": self.page_area,
+            "aspect_ratio": self.aspect_ratio,
+            "component_utilization_ratio": self.component_utilization_ratio,
+            "visual_diagnostics": [diag.model_dump(mode="json") for diag in self.visual_diagnostics],
+            "unexpected_visual_diagnostics": [diag.model_dump(mode="json") for diag in self.unexpected_visual_diagnostics],
+            "expected_visual_diagnostics": [diag.model_dump(mode="json") for diag in self.expected_visual_diagnostics],
+            "valid": self.valid,
+            "final_score": self.final_score,
+            "rejection_reasons": self.rejection_reasons,
+            "metrics": self.metrics,
+        }
+
+
+@dataclass(frozen=True)
 class PlacementComparison:
     initial_score: PlacementScore
     optimized_score: PlacementScore
     passes: int
     candidate_evaluations: int
+    route_validations: int
     elapsed_ms: float
     budget_reached: bool
+    budget_reason: str | None
+    fast_path: str | None
     moves: list[dict[str, object]]
+    candidate_reports: list[dict[str, object]] = field(default_factory=list)
+    initial_evaluation: RoutedLayoutEvaluation | None = None
+    optimized_evaluation: RoutedLayoutEvaluation | None = None
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -109,9 +198,15 @@ class PlacementComparison:
             "optimized_score": self.optimized_score.to_dict(),
             "passes": self.passes,
             "candidate_evaluations": self.candidate_evaluations,
+            "route_validations": self.route_validations,
             "elapsed_ms": self.elapsed_ms,
             "budget_reached": self.budget_reached,
+            "budget_reason": self.budget_reason,
+            "fast_path": self.fast_path,
             "moves": self.moves,
+            "candidate_reports": self.candidate_reports,
+            "initial_evaluation": self.initial_evaluation.to_dict() if self.initial_evaluation else None,
+            "optimized_evaluation": self.optimized_evaluation.to_dict() if self.optimized_evaluation else None,
         }
 
 
@@ -126,6 +221,17 @@ class PlacementOptimizationResult:
 class MoveUnit:
     unit_id: str
     refs: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class CandidateProposal:
+    candidate_id: str
+    unit: MoveUnit
+    layout: Layout
+    pre_score: PlacementScore
+    transformation: dict[str, object]
+    displacement: float
+    orientation_changes: int = 0
 
 
 class PlacementScorer:
@@ -301,7 +407,7 @@ class PlacementScorer:
     def _group_penalties(self, analysis: TopologyAnalysis, centers: dict[str, tuple[float, float]]) -> tuple[float, float]:
         group_penalty = 0.0
         controller_penalty = 0.0
-        for pattern in _strong_patterns(analysis):
+        for pattern in sorted(_strong_patterns(analysis), key=lambda item: (-len(set(item.component_refs)), item.pattern_type.value, sorted(item.component_refs))):
             refs = [ref for ref in pattern.component_refs if ref in centers]
             if len(refs) < 2:
                 continue
@@ -318,7 +424,7 @@ class PlacementScorer:
     def _alignment_penalty(self, analysis: TopologyAnalysis, centers: dict[str, tuple[float, float]]) -> float:
         penalty = 0.0
         by_type: dict[PatternType, list[TopologyPattern]] = {}
-        for pattern in _strong_patterns(analysis):
+        for pattern in sorted(_strong_patterns(analysis), key=lambda item: (-len(set(item.component_refs)), item.pattern_type.value, sorted(item.component_refs))):
             by_type.setdefault(pattern.pattern_type, []).append(pattern)
         for pattern_type, patterns in sorted(by_type.items(), key=lambda item: item[0].value):
             if len(patterns) < 2:
@@ -364,59 +470,95 @@ class ConstraintPlacementOptimizer:
         initial = initial_layout.model_copy(deep=True)
         working = initial_layout.model_copy(deep=True)
         initial_score = self.scorer.score(circuit, library, initial, analysis, fixed_refs=fixed_refs, fixed_layout=initial)
+        initial_evaluation = self.evaluate_layout(circuit, library, initial, analysis, initial_score, baseline_counts=None, fixed_refs=fixed_refs, fixed_layout=initial, initial_layout=initial)
+        baseline_counts = _diagnostic_counts(initial_evaluation.visual_diagnostics)
+        initial_evaluation = self.evaluate_layout(circuit, library, initial, analysis, initial_score, baseline_counts=baseline_counts, fixed_refs=fixed_refs, fixed_layout=initial, initial_layout=initial)
+        best_evaluation = initial_evaluation
         best_score = initial_score
         evaluations = 0
+        route_validations = 0
         moves: list[dict[str, object]] = []
+        candidate_reports: list[dict[str, object]] = []
         passes = 0
         budget_reached = False
+        budget_reason: str | None = None
+        fast_path: str | None = None
 
         if self.config.mode not in {"optimize", "score_only"}:
-            comparison = PlacementComparison(initial_score, initial_score, 0, 0, (perf_counter() - start) * 1000, False, [])
+            fast_path = "optimizer_off"
+            comparison = PlacementComparison(initial_score, initial_score, 0, 0, 0, (perf_counter() - start) * 1000, False, None, fast_path, [], [], initial_evaluation, initial_evaluation)
             return PlacementOptimizationResult(initial, initial, comparison)
         if self.config.mode == "score_only":
-            comparison = PlacementComparison(initial_score, initial_score, 0, 0, (perf_counter() - start) * 1000, False, [])
+            fast_path = "score_only"
+            comparison = PlacementComparison(initial_score, initial_score, 0, 0, 0, (perf_counter() - start) * 1000, False, None, fast_path, [], [], initial_evaluation, initial_evaluation)
             return PlacementOptimizationResult(initial, initial, comparison)
 
         units = self._move_units(analysis, circuit, working, fixed_refs)
+        if not units:
+            fast_path = "no_movable_components"
+            comparison = PlacementComparison(initial_score, initial_score, 0, 0, 0, (perf_counter() - start) * 1000, False, None, fast_path, [], [], initial_evaluation, initial_evaluation)
+            return PlacementOptimizationResult(initial, initial, comparison)
+        if initial_score.hard_violation_count == 0 and not self.config.optimize_soft_constraints:
+            fast_path = "hard_only_clean_layout"
+            comparison = PlacementComparison(initial_score, initial_score, 0, 0, 0, (perf_counter() - start) * 1000, False, None, fast_path, [], [], initial_evaluation, initial_evaluation)
+            return PlacementOptimizationResult(initial, initial, comparison)
+
         for pass_index in range(self.config.max_passes):
             passes = pass_index + 1
             improved = False
+            route_validations_this_pass = 0
             for unit in units:
                 if evaluations >= self.config.max_total_evaluations:
                     budget_reached = True
+                    budget_reason = "MAX_PREFILTER_EVALUATIONS"
                     break
-                candidate_score = best_score
-                candidate_layout = working
-                candidate_offset = (0, 0)
-                for dx, dy in self._candidate_offsets(unit):
-                    if dx == 0 and dy == 0:
-                        continue
-                    candidate = self._apply_offset(working, unit, dx, dy)
-                    score = self.scorer.score(circuit, library, candidate, analysis, fixed_refs=fixed_refs, fixed_layout=initial)
-                    evaluations += 1
-                    if self._is_improvement(score, candidate_score):
-                        candidate_score = score
-                        candidate_layout = candidate
-                        candidate_offset = (dx, dy)
-                    if evaluations >= self.config.max_total_evaluations:
+                if route_validations >= self.config.max_total_route_validations:
+                    budget_reached = True
+                    budget_reason = "MAX_ROUTE_VALIDATIONS"
+                    break
+                if (perf_counter() - start) * 1000 >= self.config.max_optimization_time_ms:
+                    budget_reached = True
+                    budget_reason = "MAX_OPTIMIZATION_TIME_MS"
+                    break
+                proposals, proposal_evaluations = self._prefilter_candidates(circuit, library, working, analysis, unit, best_score, initial, fixed_refs)
+                evaluations += proposal_evaluations
+                for proposal in proposals:
+                    if route_validations >= self.config.max_total_route_validations:
                         budget_reached = True
+                        budget_reason = "MAX_ROUTE_VALIDATIONS"
                         break
-                if candidate_layout is not working:
-                    moves.append(
-                        {
-                            "pass": passes,
-                            "unit_id": unit.unit_id,
-                            "refs": list(unit.refs),
-                            "offset": {"x": candidate_offset[0], "y": candidate_offset[1]},
-                            "score_before": best_score.total,
-                            "score_after": candidate_score.total,
-                            "hard_before": best_score.hard_violation_count,
-                            "hard_after": candidate_score.hard_violation_count,
-                        }
-                    )
-                    working = candidate_layout
-                    best_score = candidate_score
-                    improved = True
+                    if route_validations_this_pass >= self.config.max_route_validations_per_pass:
+                        budget_reached = True
+                        budget_reason = "MAX_ROUTE_VALIDATIONS_PER_PASS"
+                        break
+                    route_start = perf_counter()
+                    evaluation = self.evaluate_layout(circuit, library, proposal.layout, analysis, proposal.pre_score, baseline_counts=baseline_counts, fixed_refs=fixed_refs, fixed_layout=initial, initial_layout=initial)
+                    route_validations += 1
+                    route_validations_this_pass += 1
+                    accepted, reason = self._accept_routed_candidate(evaluation, best_evaluation)
+                    report = self._candidate_report(proposal, evaluation, accepted, reason, (perf_counter() - route_start) * 1000)
+                    candidate_reports.append(report)
+                    if accepted:
+                        moves.append(
+                            {
+                                "pass": passes,
+                                "candidate_id": proposal.candidate_id,
+                                "unit_id": unit.unit_id,
+                                "refs": list(unit.refs),
+                                "transformation": proposal.transformation,
+                                "score_before": best_score.total,
+                                "score_after": proposal.pre_score.total,
+                                "final_score_before": best_evaluation.final_score,
+                                "final_score_after": evaluation.final_score,
+                                "hard_before": best_score.hard_violation_count,
+                                "hard_after": proposal.pre_score.hard_violation_count,
+                            }
+                        )
+                        working = proposal.layout
+                        best_score = proposal.pre_score
+                        best_evaluation = evaluation
+                        improved = True
+                        break
                 if budget_reached:
                     break
             if budget_reached or not improved:
@@ -424,25 +566,268 @@ class ConstraintPlacementOptimizer:
 
         self._resize_canvas(circuit, library, working)
         final_score = self.scorer.score(circuit, library, working, analysis, fixed_refs=fixed_refs, fixed_layout=initial)
-        if final_score.total > initial_score.total and final_score.hard_violation_count >= initial_score.hard_violation_count:
+        final_evaluation = self.evaluate_layout(circuit, library, working, analysis, final_score, baseline_counts=baseline_counts, fixed_refs=fixed_refs, fixed_layout=initial, initial_layout=initial)
+        if not final_evaluation.valid:
             working = initial
             final_score = initial_score
-            moves.append({"fallback": True, "reason": "optimized score was worse than initial score"})
-        comparison = PlacementComparison(initial_score, final_score, passes, evaluations, (perf_counter() - start) * 1000, budget_reached, moves)
+            final_evaluation = initial_evaluation
+            moves.append({"fallback": True, "reason": "LAST_KNOWN_VALID_FALLBACK"})
+        comparison = PlacementComparison(
+            initial_score,
+            final_score,
+            passes,
+            evaluations,
+            route_validations,
+            (perf_counter() - start) * 1000,
+            budget_reached,
+            budget_reason,
+            fast_path,
+            moves,
+            candidate_reports,
+            initial_evaluation,
+            final_evaluation,
+        )
         return PlacementOptimizationResult(initial, working, comparison)
+
+    def evaluate_layout(
+        self,
+        circuit: Circuit,
+        library: ComponentLibrary,
+        layout: Layout,
+        analysis: TopologyAnalysis,
+        placement_score: PlacementScore | None = None,
+        *,
+        baseline_counts: Counter[str] | None = None,
+        fixed_refs: set[str] | None = None,
+        fixed_layout: Layout | None = None,
+        initial_layout: Layout | None = None,
+    ) -> RoutedLayoutEvaluation:
+        placement_score = placement_score or self.scorer.score(circuit, library, layout, analysis, fixed_refs=fixed_refs, fixed_layout=fixed_layout)
+        rejection_reasons: list[str] = []
+        if placement_score.hard_violation_count:
+            rejection_reasons.append("HARD_CONSTRAINT_VIOLATION")
+        routes = ManhattanRouter().route(circuit, library, layout)
+        route_warnings = [warning for route in routes for warning in route.warnings]
+        routing_succeeded = not route_warnings
+        if not routing_succeeded:
+            rejection_reasons.append("ROUTING_FAILED")
+        scene = build_schematic_scene(circuit, library, layout, routes)
+        visual_diagnostics, visual_metrics = _visual_drc_from_scene(scene)
+        expected_visual, unexpected_visual = _split_visual_diagnostics(visual_diagnostics, baseline_counts)
+        if unexpected_visual:
+            rejection_reasons.append("NEW_VISUAL_DRC")
+        routed_metrics = _routed_metrics(scene, visual_metrics)
+        displacement, orientation_changes = _layout_displacement(initial_layout or layout, layout)
+        final_score = self._final_score(placement_score, routed_metrics, len(unexpected_visual), not routing_succeeded, displacement, orientation_changes)
+        scene_bounds = routed_metrics["scene_bounds"]
+        assert isinstance(scene_bounds, Bounds)
+        valid = not rejection_reasons
+        metrics = {
+            **{key: float(value) for key, value in visual_metrics.items() if isinstance(value, (int, float))},
+            **{key: float(value) for key, value in routed_metrics.items() if isinstance(value, (int, float))},
+            "displacement": float(displacement),
+            "orientation_changes": float(orientation_changes),
+        }
+        return RoutedLayoutEvaluation(
+            placement_score=placement_score,
+            validation_level=CandidateValidationLevel.SCENE_VALIDATED,
+            routing_succeeded=routing_succeeded,
+            route_count=len(routes),
+            total_routed_length=float(routed_metrics["total_routed_length"]),
+            total_bend_count=int(routed_metrics["total_bend_count"]),
+            wire_segment_count=int(routed_metrics["wire_segment_count"]),
+            net_count=int(routed_metrics["net_count"]),
+            max_net_length=float(routed_metrics["max_net_length"]),
+            average_net_length=float(routed_metrics["average_net_length"]),
+            scene_bounds=scene_bounds,
+            page_area=float(routed_metrics["scene_area"]),
+            aspect_ratio=float(routed_metrics["aspect_ratio"]),
+            component_utilization_ratio=float(routed_metrics["component_utilization_ratio"]),
+            visual_diagnostics=visual_diagnostics,
+            unexpected_visual_diagnostics=unexpected_visual,
+            expected_visual_diagnostics=expected_visual,
+            valid=valid,
+            final_score=final_score,
+            rejection_reasons=rejection_reasons,
+            metrics=metrics,
+        )
+
+    def _prefilter_candidates(
+        self,
+        circuit: Circuit,
+        library: ComponentLibrary,
+        layout: Layout,
+        analysis: TopologyAnalysis,
+        unit: MoveUnit,
+        best_score: PlacementScore,
+        initial_layout: Layout,
+        fixed_refs: set[str],
+    ) -> tuple[list[CandidateProposal], int]:
+        proposals: list[CandidateProposal] = []
+        evaluations = 0
+        for candidate_id, candidate_layout, transformation, orientation_changes in self._candidate_layouts(circuit, library, layout, analysis, unit):
+            score = self.scorer.score(circuit, library, candidate_layout, analysis, fixed_refs=fixed_refs, fixed_layout=initial_layout)
+            evaluations += 1
+            if score.hard_penalty > best_score.hard_penalty and score.hard_violation_count >= best_score.hard_violation_count:
+                continue
+            if score.hard_penalty == best_score.hard_penalty and score.hard_violation_count == best_score.hard_violation_count and not self.config.optimize_soft_constraints:
+                continue
+            if score.hard_penalty == best_score.hard_penalty and score.hard_violation_count == best_score.hard_violation_count and score.total >= best_score.total:
+                continue
+            displacement, _ = _layout_displacement(layout, candidate_layout, unit.refs)
+            proposals.append(CandidateProposal(candidate_id, unit, candidate_layout, score, transformation, displacement, orientation_changes))
+            if evaluations >= self.config.max_total_evaluations:
+                break
+        proposals.sort(key=lambda proposal: (proposal.pre_score.hard_penalty, proposal.pre_score.hard_violation_count, proposal.pre_score.total, proposal.displacement, proposal.candidate_id))
+        return proposals[: self.config.max_prefilter_candidates], evaluations
+
+    def _candidate_layouts(
+        self,
+        circuit: Circuit,
+        library: ComponentLibrary,
+        layout: Layout,
+        analysis: TopologyAnalysis,
+        unit: MoveUnit,
+    ) -> Iterable[tuple[str, Layout, dict[str, object], int]]:
+        for dx, dy in self._candidate_offsets(unit):
+            if dx == 0 and dy == 0:
+                continue
+            candidate = self._apply_offset(layout, unit, dx, dy)
+            yield (
+                f"{unit.unit_id}:move:{dx}:{dy}",
+                candidate,
+                {"kind": "move", "offset": {"x": dx, "y": dy}},
+                0,
+            )
+        if not self.config.enable_orientation_candidates:
+            return
+        locked_orientation_refs = self._strong_orientation_refs(analysis)
+        for ref in unit.refs:
+            placement = layout.components.get(ref)
+            if not placement or placement.locked or ref in locked_orientation_refs:
+                continue
+            instance = next((component for component in circuit.components if component.ref == ref), None)
+            definition = library.get(instance.component_id) if instance else None
+            if not definition or not is_orientation_sensitive(definition):
+                continue
+            current = placement.rotation % 180
+            target = 90 if current == 0 else 0
+            candidate = layout.model_copy(deep=True)
+            candidate.components[ref].rotation = target
+            yield (
+                f"{unit.unit_id}:rotate:{ref}:{target}",
+                candidate,
+                {"kind": "rotate", "component_ref": ref, "rotation": target},
+                1,
+            )
+
+    def _strong_orientation_refs(self, analysis: TopologyAnalysis) -> set[str]:
+        orientation_locked = {
+            PatternType.VOLTAGE_DIVIDER,
+            PatternType.PULL_UP,
+            PatternType.PULL_DOWN,
+            PatternType.DECOUPLING_CAPACITOR,
+            PatternType.SERIES_GATE_RESISTOR,
+            PatternType.LED_CURRENT_LIMIT,
+            PatternType.LOW_SIDE_MOSFET_SWITCH,
+            PatternType.RC_LOWPASS,
+        }
+        return {
+            ref
+            for pattern in _strong_patterns(analysis)
+            if pattern.pattern_type in orientation_locked
+            for ref in pattern.component_refs
+        }
+
+    def _accept_routed_candidate(self, evaluation: RoutedLayoutEvaluation, best: RoutedLayoutEvaluation) -> tuple[bool, str]:
+        if not evaluation.valid:
+            return False, ",".join(evaluation.rejection_reasons)
+        if evaluation.placement_score.hard_penalty < best.placement_score.hard_penalty:
+            return True, "HARD_CONSTRAINT_IMPROVED"
+        if evaluation.placement_score.hard_violation_count < best.placement_score.hard_violation_count:
+            return True, "HARD_CONSTRAINT_COUNT_IMPROVED"
+        if evaluation.placement_score.hard_penalty > best.placement_score.hard_penalty or evaluation.placement_score.hard_violation_count > best.placement_score.hard_violation_count:
+            return False, "HARD_CONSTRAINT_VIOLATION"
+        if not self.config.optimize_soft_constraints:
+            return False, "SOFT_OPTIMIZATION_DISABLED"
+        if evaluation.final_score + self.config.min_final_score_improvement < best.final_score:
+            return True, "FINAL_SCORE_IMPROVED"
+        return False, "FINAL_SCORE_NOT_IMPROVED"
+
+    def _candidate_report(
+        self,
+        proposal: CandidateProposal,
+        evaluation: RoutedLayoutEvaluation,
+        accepted: bool,
+        reason: str,
+        validation_time_ms: float,
+    ) -> dict[str, object]:
+        return {
+            "candidate_id": proposal.candidate_id,
+            "unit_id": proposal.unit.unit_id,
+            "refs": list(proposal.unit.refs),
+            "transformation": proposal.transformation,
+            "pre_routing_score": proposal.pre_score.total,
+            "estimated_connection_cost": proposal.pre_score.metrics.get("estimated_wire_length", 0.0),
+            "routing_succeeded": evaluation.routing_succeeded,
+            "actual_wire_length": evaluation.total_routed_length,
+            "actual_bend_count": evaluation.total_bend_count,
+            "scene_bounds": evaluation.scene_bounds.model_dump(mode="json"),
+            "drc_codes": sorted(diag.code for diag in evaluation.visual_diagnostics if diag.code),
+            "new_diagnostics": sorted(diag.code for diag in evaluation.unexpected_visual_diagnostics if diag.code),
+            "final_score": evaluation.final_score,
+            "accepted": accepted,
+            "rejection_reason": None if accepted else reason,
+            "validation_time_ms": validation_time_ms,
+        }
+
+    def _final_score(
+        self,
+        placement_score: PlacementScore,
+        routed_metrics: dict[str, object],
+        unexpected_visual_count: int,
+        routing_failed: bool,
+        displacement: float,
+        orientation_changes: int,
+    ) -> float:
+        weights = self.config.routed_weights
+        score = placement_score.hard_penalty
+        if routing_failed:
+            score += weights.routing_failure_penalty
+        score += unexpected_visual_count * weights.visual_drc_penalty
+        score += float(routed_metrics["total_routed_length"]) * weights.actual_wire_length_weight
+        score += float(routed_metrics["total_bend_count"]) * weights.actual_bend_weight
+        score += float(routed_metrics["max_net_length"]) * weights.max_net_length_weight
+        score += float(routed_metrics["scene_area"]) * weights.page_area_weight
+        aspect_ratio = float(routed_metrics["aspect_ratio"])
+        if aspect_ratio < self.config.preferred_aspect_min:
+            score += (self.config.preferred_aspect_min - aspect_ratio) * weights.aspect_ratio_weight
+        if aspect_ratio > self.config.preferred_aspect_max:
+            score += (aspect_ratio - self.config.preferred_aspect_max) * weights.aspect_ratio_weight
+        score += displacement * weights.displacement_weight
+        score += orientation_changes * weights.orientation_change_weight
+        return score
 
     def _move_units(self, analysis: TopologyAnalysis, circuit: Circuit, layout: Layout, fixed_refs: set[str]) -> list[MoveUnit]:
         used: set[str] = set()
+        protected_refs: set[str] = set()
         units: list[MoveUnit] = []
-        for pattern in _strong_patterns(analysis):
+        strong_patterns = sorted(_strong_patterns(analysis), key=lambda item: (-len(set(item.component_refs)), item.pattern_type.value, sorted(item.component_refs)))
+        membership = Counter(ref for pattern in strong_patterns for ref in set(pattern.component_refs))
+        overlapping_refs = {ref for ref, count in membership.items() if count > 1}
+        for pattern in strong_patterns:
             refs = tuple(ref for ref in sorted(set(pattern.component_refs)) if ref in layout.components and ref not in fixed_refs and not layout.components[ref].locked)
+            if set(refs) & overlapping_refs:
+                protected_refs.update(refs)
+                used.update(refs)
+                continue
             refs = tuple(ref for ref in refs if ref not in used)
             if len(refs) > 1:
                 units.append(MoveUnit(f"group:{pattern.pattern_type.value}:{','.join(refs)}", refs))
                 used.update(refs)
         for component in sorted(circuit.components, key=lambda item: item.ref):
             placement = layout.components.get(component.ref)
-            if component.ref not in used and placement and not placement.locked and component.ref not in fixed_refs:
+            if component.ref not in used and component.ref not in protected_refs and placement and not placement.locked and component.ref not in fixed_refs:
                 units.append(MoveUnit(f"component:{component.ref}", (component.ref,)))
         return units
 
@@ -491,6 +876,204 @@ class ConstraintPlacementOptimizer:
             max_y = max(max_y, placement.y + height)
         layout.canvas["width"] = max(int(layout.canvas.get("width", 0)), _snap(max_x + 220, self.config.grid))
         layout.canvas["height"] = max(int(layout.canvas.get("height", 0)), _snap(max_y + 220, self.config.grid))
+
+
+def _visual_drc_from_scene(scene: SchematicScene) -> tuple[list[Diagnostic], dict[str, Any]]:
+    diagnostics: list[Diagnostic] = []
+    body_boxes: list[tuple[str, tuple[float, float, float, float]]] = []
+    symbol_boxes: list[tuple[str, tuple[float, float, float, float]]] = []
+    text_boxes: list[tuple[str, tuple[float, float, float, float]]] = []
+    physical_text_boxes: list[tuple[str, tuple[float, float, float, float]]] = []
+    pin_points: dict[str, set[tuple[int, int]]] = {}
+    for element in scene.elements:
+        if element.kind == "component_body" and element.component_ref:
+            body_boxes.append((element.component_ref, _element_rect_box(element) or element.active_collision_bounds().as_tuple()))
+        if element.kind == "component_symbol" and element.component_ref:
+            symbol_boxes.append((element.component_ref, element.active_collision_bounds().as_tuple()))
+        if element.kind == "pin" and element.component_ref:
+            pin_points.setdefault(element.component_ref, set()).add(_pin_center(element))
+        if element.text and element.metadata.get("drc_wire_text", True):
+            item = (element.component_ref or "", element.text.bounds.as_tuple())
+            text_boxes.append(item)
+            if element.metadata.get("physical_wire_text_drc"):
+                physical_text_boxes.append(item)
+
+    wire_like = _wire_like_segments_from_scene(scene)
+    component_overlaps = sum(1 for index, (_, box) in enumerate(body_boxes) for _, other in body_boxes[index + 1 :] if boxes_overlap(box, other))
+    wire_symbol_overlaps = 0
+    for _, _, source_ref, segment in wire_like:
+        for ref, box in symbol_boxes:
+            if ref == source_ref or (segment[0], segment[1]) in pin_points.get(ref, set()) or (segment[2], segment[3]) in pin_points.get(ref, set()):
+                continue
+            if segment_crosses_box(segment, box):
+                wire_symbol_overlaps += 1
+    wire_text_overlaps = sum(1 for _, _, _, segment in wire_like for ref, box in text_boxes if not _segment_touches_component_pin(segment, pin_points.get(ref, set())) and segment_crosses_box(segment, inflate_box(box, 8)))
+    physical_wire_text_overlaps = sum(1 for _, kind, _, segment in wire_like if kind == "wire" for ref, box in physical_text_boxes if not _segment_touches_component_pin(segment, pin_points.get(ref, set())) and segment_crosses_box(segment, inflate_box(box, 8)))
+    wire_overlaps = sum(1 for index, a in enumerate(wire_like) for b in wire_like[index + 1 :] if a[0] != b[0] and segments_collinear_overlap(a[3], b[3]))
+
+    if component_overlaps:
+        diagnostics.append(Diagnostic(severity=Severity.ERROR, code="DRC_COMPONENT_OVERLAP", message=f"{component_overlaps} component body overlaps"))
+    if wire_symbol_overlaps:
+        diagnostics.append(Diagnostic(severity=Severity.ERROR, code="DRC_WIRE_SYMBOL_OVERLAP", message=f"{wire_symbol_overlaps} wire/symbol overlaps"))
+    if wire_overlaps:
+        diagnostics.append(Diagnostic(severity=Severity.WARNING, code="DRC_WIRE_WIRE_OVERLAP", message=f"{wire_overlaps} unrelated wire overlaps"))
+    if physical_wire_text_overlaps:
+        diagnostics.append(Diagnostic(severity=Severity.WARNING, code="DRC_WIRE_TEXT_OVERLAP", message=f"{physical_wire_text_overlaps} physical wire/text overlaps"))
+
+    total_wire_length = sum(abs(x1 - x2) + abs(y1 - y2) for _, _, _, (x1, y1, x2, y2) in wire_like)
+    metrics = {
+        "component_body_overlaps": component_overlaps,
+        "wire_symbol_overlaps": wire_symbol_overlaps,
+        "wire_text_overlaps": wire_text_overlaps,
+        "physical_wire_text_overlaps": physical_wire_text_overlaps,
+        "unrelated_wire_overlaps": wire_overlaps,
+        "total_wire_length": total_wire_length,
+        "physical_wire_segments": sum(1 for _, kind, _, _ in wire_like if kind == "wire"),
+        "net_labels": sum(1 for element in scene.elements if element.kind == "net_label" and element.metadata.get("attachment")),
+        "power_symbols": sum(1 for element in scene.elements if element.kind in {"power_symbol", "ground_symbol"}),
+        "orientations": scene.metadata.get("orientations", {}),
+    }
+    return diagnostics, metrics
+
+
+def _routed_metrics(scene: SchematicScene, visual_metrics: dict[str, Any]) -> dict[str, object]:
+    wire_like = _wire_like_segments_from_scene(scene)
+    lengths_by_net: dict[str, float] = {}
+    segments_by_net: dict[str, list[tuple[int, int, int, int]]] = {}
+    for net_name, _, _, segment in wire_like:
+        length = abs(segment[0] - segment[2]) + abs(segment[1] - segment[3])
+        lengths_by_net[net_name] = lengths_by_net.get(net_name, 0.0) + length
+        segments_by_net.setdefault(net_name, []).append(segment)
+    total_length = float(sum(lengths_by_net.values()))
+    net_count = len(lengths_by_net)
+    content_bounds = _content_bounds(scene)
+    scene_area = max(content_bounds.width, 0) * max(content_bounds.height, 0)
+    component_area = sum(element.bounds.width * element.bounds.height for element in scene.elements if element.kind == "component_body")
+    diagnostic_counts = Counter(diag.code or "" for diag in _visual_drc_from_scene(scene)[0])
+    return {
+        "total_routed_length": total_length,
+        "wire_segment_count": len(wire_like),
+        "total_bend_count": _bend_count_by_net(segments_by_net),
+        "net_count": net_count,
+        "max_net_length": max(lengths_by_net.values(), default=0.0),
+        "average_net_length": total_length / net_count if net_count else 0.0,
+        "scene_bounds": content_bounds,
+        "scene_width": content_bounds.width,
+        "scene_height": content_bounds.height,
+        "scene_area": scene_area,
+        "aspect_ratio": content_bounds.width / content_bounds.height if content_bounds.height else 1.0,
+        "component_utilization_ratio": component_area / scene_area if scene_area else 0.0,
+        "visual_diagnostic_count": sum(diagnostic_counts.values()),
+        **{f"visual_diagnostic_{code}": count for code, count in sorted(diagnostic_counts.items()) if code},
+        **{key: value for key, value in visual_metrics.items() if isinstance(value, (int, float))},
+    }
+
+
+def _wire_like_segments_from_scene(scene: SchematicScene) -> list[tuple[str, str, str, tuple[int, int, int, int]]]:
+    segments: list[tuple[str, str, str, tuple[int, int, int, int]]] = []
+    for element in scene.elements:
+        if element.kind not in {"wire", "wire_stub"}:
+            continue
+        segment = _line_segment_from_element(element)
+        if not segment:
+            continue
+        segments.append((element.net_name or "", str(element.metadata.get("wire_kind", "wire")), str(element.metadata.get("source_ref", "")), segment))
+    return segments
+
+
+def _line_segment_from_element(element: Any) -> tuple[int, int, int, int] | None:
+    primitive = next((primitive for primitive in element.primitives if primitive.kind == "line"), None)
+    if primitive:
+        geometry = primitive.geometry
+        return (round(float(geometry["x1"])), round(float(geometry["y1"])), round(float(geometry["x2"])), round(float(geometry["y2"])))
+    segment = element.metadata.get("segment")
+    if segment and len(segment) == 4:
+        return (int(segment[0]), int(segment[1]), int(segment[2]), int(segment[3]))
+    return None
+
+
+def _element_rect_box(element: Any) -> tuple[float, float, float, float] | None:
+    primitive = next((primitive for primitive in element.primitives if primitive.kind == "rect"), None)
+    if not primitive:
+        return None
+    geometry = primitive.geometry
+    x = float(geometry["x"])
+    y = float(geometry["y"])
+    return (x, y, x + float(geometry["width"]), y + float(geometry["height"]))
+
+
+def _pin_center(element: Any) -> tuple[int, int]:
+    primitive = element.primitives[0].geometry if element.primitives else {}
+    if "cx" in primitive and "cy" in primitive:
+        return (round(float(primitive["cx"])), round(float(primitive["cy"])))
+    return (round((element.bounds.min_x + element.bounds.max_x) / 2), round((element.bounds.min_y + element.bounds.max_y) / 2))
+
+
+def _segment_touches_component_pin(segment: tuple[int, int, int, int], pins: set[tuple[int, int]]) -> bool:
+    return (segment[0], segment[1]) in pins or (segment[2], segment[3]) in pins
+
+
+def _content_bounds(scene: SchematicScene) -> Bounds:
+    visible_bounds = [element.bounds for element in scene.elements if element.visible]
+    if not visible_bounds:
+        return scene.canvas_bounds
+    return Bounds(
+        min_x=min(bounds.min_x for bounds in visible_bounds),
+        min_y=min(bounds.min_y for bounds in visible_bounds),
+        max_x=max(bounds.max_x for bounds in visible_bounds),
+        max_y=max(bounds.max_y for bounds in visible_bounds),
+    )
+
+
+def _bend_count_by_net(segments_by_net: dict[str, list[tuple[int, int, int, int]]]) -> int:
+    bends = 0
+    for segments in segments_by_net.values():
+        previous_orientation: str | None = None
+        previous_end: tuple[int, int] | None = None
+        for segment in segments:
+            orientation = "vertical" if segment[0] == segment[2] else "horizontal" if segment[1] == segment[3] else "diagonal"
+            start = (segment[0], segment[1])
+            end = (segment[2], segment[3])
+            if previous_orientation and previous_end == start and previous_orientation != orientation:
+                bends += 1
+            previous_orientation = orientation
+            previous_end = end
+    return bends
+
+
+def _diagnostic_counts(diagnostics: list[Diagnostic]) -> Counter[str]:
+    return Counter(diag.code or "" for diag in diagnostics if diag.code)
+
+
+def _split_visual_diagnostics(diagnostics: list[Diagnostic], baseline_counts: Counter[str] | None) -> tuple[list[Diagnostic], list[Diagnostic]]:
+    if baseline_counts is None:
+        return diagnostics, []
+    used: Counter[str] = Counter()
+    expected: list[Diagnostic] = []
+    unexpected: list[Diagnostic] = []
+    for diag in diagnostics:
+        code = diag.code or ""
+        if code and used[code] < baseline_counts.get(code, 0):
+            expected.append(diag)
+            used[code] += 1
+        else:
+            unexpected.append(diag)
+    return expected, unexpected
+
+
+def _layout_displacement(initial: Layout, current: Layout, refs: Iterable[str] | None = None) -> tuple[float, int]:
+    refs_to_check = sorted(set(refs or set(initial.components) | set(current.components)))
+    displacement = 0.0
+    orientation_changes = 0
+    for ref in refs_to_check:
+        original = initial.components.get(ref)
+        moved = current.components.get(ref)
+        if not original or not moved:
+            continue
+        displacement += abs(original.x - moved.x) + abs(original.y - moved.y)
+        if original.rotation % 360 != moved.rotation % 360:
+            orientation_changes += 1
+    return displacement, orientation_changes
 
 
 def _component_boxes(circuit: Circuit, library: ComponentLibrary, layout: Layout) -> dict[str, tuple[float, float, float, float]]:

@@ -33,6 +33,7 @@ class LabelPlacementContext:
     def __init__(self, circuit: Circuit, library: ComponentLibrary, layout: Layout, routes: list[RoutedNet]) -> None:
         self.body_boxes: list[Box] = []
         self.physical_boxes: list[Box] = []
+        self.symbol_clearance_boxes: list[Box] = []
         self.text_boxes: list[Box] = []
         self.stub_segments: list[Segment] = []
         self.wire_segments: list[Segment] = [segment for route in routes for segment in route.segments]
@@ -47,6 +48,7 @@ class LabelPlacementContext:
             self.body_boxes.append(physical_symbol_box)
             self.physical_boxes.append(body_box)
             self.physical_boxes.append(physical_symbol_box)
+            self.symbol_clearance_boxes.append(inflate_box(physical_symbol_box, 10))
             if definition.category == "MCU":
                 _, _, body_x2, body_y2 = body_box
                 self.body_boxes.append(
@@ -88,6 +90,9 @@ class LabelPlacementContext:
 
     def segment_collides_with_body(self, segment: Segment) -> bool:
         return any(segment_crosses_box(segment, body) for body in self.physical_boxes)
+
+    def segment_collides_with_symbol_clearance(self, segment: Segment) -> bool:
+        return any(segment_crosses_box(segment, body) for body in self.symbol_clearance_boxes)
 
     def segment_collides_with_wire(self, segment: Segment) -> bool:
         return any(segments_collinear_overlap(segment, other) for other in [*self.wire_segments, *self.stub_segments])
@@ -170,7 +175,7 @@ def choose_power_attachment(net_name: str, x: int, y: int, side: str, context: L
                     return segments, x, symbol_y
         assert best is not None
         return best[1], best[2], best[3]
-    lateral_offsets = [0, 24, -24, 48, -48, 72, -72]
+    lateral_offsets = [0, 24, -24, 48, -48, 72, -72, 96, -96, 128, -128]
     for escape_distance in escape_distances:
         escape_x = x + escape_dx(side, escape_distance)
         escape_y = y + escape_dy(side, escape_distance)
@@ -232,12 +237,13 @@ def attachment_collision_count(segments: list[Segment], symbol_x: int, symbol_y:
     count = 0
     for segment in segments:
         count += int(context.segment_collides_with_body(segment))
+        count += int(context.segment_collides_with_symbol_clearance(segment))
         count += int(context.segment_collides_with_text(segment))
         count += int(context.segment_collides_with_wire(segment))
     symbol_bounds = power_symbol_box(symbol_x, symbol_y, net_name, kind)
     padded_symbol = inflate_box(symbol_bounds, MIN_SYMBOL_TO_TEXT_GAP)
     count += sum(1 for body in context.body_boxes if boxes_overlap(padded_symbol, body))
-    count += sum(1 for text in context.text_boxes if boxes_overlap(padded_symbol, text))
+    count += 10 * sum(1 for text in context.text_boxes if boxes_overlap(padded_symbol, text))
     count += sum(1 for segment in context.wire_segments if segment_crosses_box(segment, inflate_box(symbol_bounds, MIN_WIRE_TO_TEXT_GAP)))
     return count
 

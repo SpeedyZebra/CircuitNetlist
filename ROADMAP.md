@@ -141,7 +141,39 @@ Implemented in this branch:
 Still intentionally limited to Milestone 3A scope:
 
 - This is a scored placement foundation, not a full global placement solver.
-- Soft-constraint optimization is opt-in and not enabled by default.
+- Soft-constraint optimization requires route validation before it can be safely enabled by default.
 - The scorer estimates connection cost without invoking full routing.
 - Text and power-symbol placement are still validated primarily by scene construction and visual DRC.
 - Playwright/browser placement tests remain preserved from Milestone 2D but are deferred until Node.js/npm/Chromium are available locally.
+
+## Milestone 3B - route-validated soft optimization
+
+Status: complete
+
+Implemented in this branch:
+
+- Candidate validation levels for geometry-only, routed, and scene-validated evaluation.
+- `RoutedLayoutEvaluation` for final routed quality separate from pre-routing placement score.
+- Centralized routed-quality weights in `RoutedLayoutWeights`.
+- Baseline route/scene/visual-DRC validation before optimize-mode candidate search.
+- Diagnostic count comparison so candidates may remove existing visual diagnostics but may not introduce new ones.
+- Two-stage candidate search: cheap placement-score prefilter followed by route/scene validation for a bounded shortlist.
+- Route-validated move acceptance using actual routed wire length, actual bend count, maximum net length, scene bounds, aspect ratio, displacement, and orientation-change cost.
+- Last-known-valid fallback to the initial scene-validated layout.
+- Fast paths for off mode, score-only mode, hard-only clean layouts, and no movable/all-locked layouts.
+- Configurable budgets for prefilter evaluations, route validations per pass, total route validations, and wall-clock optimization time.
+- Conservative orientation candidates for loose two-pin passives, while strong topology pattern orientations remain protected.
+- Strong overlapping topology groups protected from partial movement so shared-controller channels are not pulled apart.
+- Driver placement fix so multiple realistic controllers receive distinct channel-aligned positions.
+- Solar VBAT overlap fix by aligning power-symbol attachment avoidance with scene DRC symbol padding.
+- Extended placement debug CLI output with routed evaluations and per-candidate acceptance/rejection records.
+- `/api/circuit/placement-score` metadata now includes routed validation status, route-validation count, rejected-candidate count, budget status, and final diagnostics.
+- Full-pipeline tests for route-validated candidate rejection, routed soft improvement, risky no-worse circuits, fast paths, budget exhaustion, orientation behavior, realistic multi-controller circuits, deterministic layout metadata, and solar visual DRC cleanup.
+
+Still intentionally limited to Milestone 3B scope:
+
+- No new routing algorithm or global placement solver.
+- Visual diagnostic comparison is code-count based; owner-aware diagnostic deltas are future work.
+- Candidate search remains bounded local movement plus conservative passive rotation.
+- Electrical diagnostics are preserved by keeping the circuit graph immutable, not by adding a new ERC milestone.
+- TODO - execute and expand Playwright browser tests once local Node/npm configuration is working.

@@ -4,7 +4,7 @@ Milestone 3A adds a scored placement foundation without replacing the current to
 
 ## Core Files
 
-- `src/circuit_netlist/constraint_placement.py` defines the scorer, weights, optimizer config, comparison models, and bounded local optimizer.
+- `src/circuit_netlist/constraint_placement.py` defines the scorer, routed-quality weights, optimizer config, comparison models, and bounded local optimizer.
 - `src/circuit_netlist/placement.py` still owns the topology heuristic and now calls the optimizer after the initial layout is built.
 - `src/circuit_netlist/placement_debug.py` writes explicit before/after debug artifacts.
 - `tests/test_constraint_placement.py` covers hard/soft scoring, optimizer modes, locked obstacles, determinism, budget limits, repeated groups, and normal visual DRC.
@@ -17,7 +17,7 @@ Milestone 3A adds a scored placement foundation without replacing the current to
 - `score_only`: the layout is scored and metadata is emitted, but no components move.
 - `optimize`: bounded local search can move non-locked automatic components.
 
-The default mode is `optimize`, but `optimize_soft_constraints` defaults to `False`. That means the optimizer repairs hard placement violations while preserving soft-only heuristic layouts.
+The default mode is `optimize` with route-validated soft optimization enabled. Shortlisted candidates are routed, turned into canonical scenes, and checked with visual DRC before acceptance. A safe no-op is preferred over accepting a visually worse schematic.
 
 ## Hard Constraints
 
@@ -45,7 +45,7 @@ Soft constraints score schematic readability:
 - Repeated group alignment.
 - Placement area, spread, and page aspect ratio.
 
-Soft scoring is always available for diagnostics. Soft optimization is opt-in.
+Soft scoring is always available for diagnostics. Soft optimization is route-validated in normal optimize mode and can be disabled with `optimize_soft_constraints=False` for hard-repair-only operation.
 
 ## Connection Cost
 
@@ -76,7 +76,21 @@ The local search is bounded by:
 - `max_total_evaluations`
 - `candidate_radii`
 
-If a candidate search ends worse than the initial layout, the optimizer falls back to the initial layout.
+If a candidate search ends worse than the initial scene-validated layout, the optimizer falls back to the last known valid layout.
+
+## Route Validation
+
+Milestone 3B adds final routed evaluation:
+
+1. Route the initial heuristic layout.
+2. Build the canonical scene.
+3. Run visual DRC and record baseline diagnostic counts.
+4. Prefilter candidates with the cheap placement score.
+5. Route and scene-validate only the shortlist.
+6. Reject candidates that add new visual DRC diagnostics or routing warnings.
+7. Accept candidates only when final routed score improves.
+
+Final routed score uses actual wire length, actual bend count, maximum net length, scene bounds, aspect ratio, displacement from the heuristic layout, orientation-change cost, and hard validity.
 
 ## Manual Layouts
 
@@ -94,7 +108,7 @@ Useful options:
 
 ```powershell
 python -m circuit_netlist.placement_debug examples\solar_led.cnet --mode score_only
-python -m circuit_netlist.placement_debug examples\solar_led.cnet --optimize-soft
+python -m circuit_netlist.placement_debug examples\solar_led.cnet --hard-only
 python -m circuit_netlist.placement_debug examples\solar_led.cnet --layout examples\555_timer_50_duty_astable.layout.json
 ```
 
@@ -119,6 +133,6 @@ Normal `Layout.canvas["placement_optimizer"]` metadata intentionally omits volat
 
 - This is not yet a full global placer.
 - Text and symbol placement are not fully simulated inside scoring.
-- The optimizer currently uses local translations only, not rotations.
-- The production default does not optimize soft constraints.
+- The optimizer uses local translations and conservative two-pin passive orientation candidates.
+- Visual diagnostic comparison is currently code-count based rather than full owner-aware matching.
 - Browser/Playwright checks are preserved but deferred for this Python-only milestone.
