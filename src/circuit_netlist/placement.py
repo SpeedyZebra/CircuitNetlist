@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 from typing import Protocol
 
 from .component_library import ComponentLibrary
+from .constraint_placement import ConstraintPlacementOptimizer, PlacementOptimizationConfig, PlacementOptimizationResult, PlacementScore
 from .geometry import component_size
 from .models import Circuit, ComponentInstance, Layout, Placement
 from .topology import ComponentRole, MIN_PLACEMENT_PATTERN_CONFIDENCE, PatternType, TopologyAnalysis, TopologyAnalyzer, TopologyPattern
@@ -110,6 +111,7 @@ class DeterministicPlacementEngine:
     grid: int = 40
     x_gap: int = 260
     y_gap: int = 170
+    optimization_config: PlacementOptimizationConfig = field(default_factory=PlacementOptimizationConfig)
 
     def place(self, circuit: Circuit, library: ComponentLibrary, existing: Layout | None = None) -> Layout:
         layout = existing.model_copy(deep=True) if existing else Layout()
@@ -124,7 +126,49 @@ class DeterministicPlacementEngine:
         self._fill_unplaced(circuit, library, layout, analysis)
         self._resize_canvas(circuit, library, layout)
         layout.canvas["functional_groups"] = self.last_group_envelopes
+        layout = self._apply_constraint_optimizer(circuit, library, layout, analysis)
         return layout
+
+    def _apply_constraint_optimizer(self, circuit: Circuit, library: ComponentLibrary, layout: Layout, analysis: TopologyAnalysis) -> Layout:
+        optimizer = ConstraintPlacementOptimizer(self.optimization_config)
+        result = optimizer.optimize(circuit, library, layout, analysis, fixed_refs=set(getattr(self, "_existing_refs", set())))
+        optimized = result.optimized_layout
+        optimized.canvas["functional_groups"] = layout.canvas.get("functional_groups", [])
+        optimized.canvas["placement_optimizer"] = self._optimizer_metadata(result)
+        return optimized
+
+    def _optimizer_metadata(self, result: PlacementOptimizationResult) -> dict[str, object]:
+        comparison = result.comparison
+        return {
+            "mode": self.optimization_config.mode,
+            "optimize_soft_constraints": self.optimization_config.optimize_soft_constraints,
+            "passes": comparison.passes,
+            "candidate_evaluations": comparison.candidate_evaluations,
+            "budget_reached": comparison.budget_reached,
+            "initial": self._score_metadata(comparison.initial_score),
+            "optimized": self._score_metadata(comparison.optimized_score),
+            "moves": comparison.moves,
+        }
+
+    def _score_metadata(self, score: PlacementScore) -> dict[str, object]:
+        return {
+            "total": round(float(score.total), 6),
+            "hard_violation_count": score.hard_violation_count,
+            "hard_penalty": round(float(score.hard_penalty), 6),
+            "soft_penalty": round(float(score.total - score.hard_penalty), 6),
+            "metrics": score.metrics,
+            "violations": [
+                {
+                    "code": violation.code,
+                    "severity": violation.severity.value,
+                    "component_refs": violation.component_refs,
+                    "penalty": round(float(violation.penalty), 6),
+                    "explanation": violation.explanation,
+                    "metadata": violation.metadata,
+                }
+                for violation in score.violations
+            ],
+        }
 
     def _place_by_role(self, circuit: Circuit, library: ComponentLibrary, layout: Layout, analysis: TopologyAnalysis) -> None:
         columns: dict[str, list[str]] = {"source": [], "power": [], "storage": [], "controller": [], "switch": [], "load": [], "passive": []}

@@ -116,3 +116,32 @@ Still intentionally limited to Milestone 2 scope:
 - PNG path curves/arcs are approximate in the Pillow raster backend.
 - Browser drag still applies a temporary SVG transform until reroute/reload regenerates the scene, and drag persistence remains tied to the explicit Save Layout action.
 - Playwright tests require Node.js/npm plus a one-time Chromium install and are not part of the Python-only pytest suite.
+
+## Milestone 3A - constraint-scored placement foundation
+
+Status: complete
+
+Implemented in this branch:
+
+- Python-only placement scoring and bounded local optimization in `constraint_placement.py`.
+- Hard constraints for component body overlap, duplicate automatic positions, locked/manual movement, locked obstacle avoidance, and canvas bounds.
+- Soft constraints for component clearance, estimated Manhattan wire length, estimated bends, wrong-facing pins, functional flow, group compactness, controller proximity, repeated-group alignment, page area, spread, and aspect ratio.
+- Centralized `PlacementWeights` and `PlacementOptimizationConfig`.
+- `off`, `score_only`, and `optimize` modes.
+- Production default that repairs hard placement violations while preserving soft-only topology heuristic layouts.
+- Deterministic candidate generation and budget-limited local search.
+- Existing topology-driven placement preserved as the initial candidate.
+- Existing/manual layout entries and locked placements treated as fixed obstacles.
+- Deterministic `layout.canvas["placement_optimizer"]` metadata without volatile timing.
+- `placement_debug` CLI for initial/optimized layouts, score JSON, comparison text, topology JSON, and optimized SVG.
+- `/api/circuit/placement-score` for app-side score inspection.
+- Audit and design docs in `docs/constraint_placement_audit.md` and `docs/constraint_scored_placement.md`.
+- Python tests covering scorer penalties, optimizer modes, locked obstacles, multiple controllers, determinism, budget limits, repeated-group integrity, renamed equivalent circuits, and normal post-routing visual DRC.
+
+Still intentionally limited to Milestone 3A scope:
+
+- This is a scored placement foundation, not a full global placement solver.
+- Soft-constraint optimization is opt-in and not enabled by default.
+- The scorer estimates connection cost without invoking full routing.
+- Text and power-symbol placement are still validated primarily by scene construction and visual DRC.
+- Playwright/browser placement tests remain preserved from Milestone 2D but are deferred until Node.js/npm/Chromium are available locally.

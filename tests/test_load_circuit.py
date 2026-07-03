@@ -117,6 +117,14 @@ def test_autoroute_returns_complete_scene_state_for_frontend_refresh() -> None:
     assert 'data-scene-version="1.0"' in routed["svg"]
 
 
+def test_placement_score_endpoint_returns_current_optimizer_summary() -> None:
+    app_module.load_case(LoadCaseRequest(case_id="example_solar_led"))
+    payload = app_module.current_placement_score()
+    assert payload["layout_available"] is True
+    assert payload["placement_optimizer"]["mode"] == "optimize"
+    assert payload["placement_optimizer"]["optimized"]["hard_violation_count"] == 0
+
+
 def test_regression_expected_summary_for_good_and_fault_cases() -> None:
     good = app_module.load_case(LoadCaseRequest(case_id="01_led_resistor_good"))
     fault = app_module.load_case(LoadCaseRequest(case_id="01_led_missing_resistor"))

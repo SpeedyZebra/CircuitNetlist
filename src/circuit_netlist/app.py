@@ -475,6 +475,18 @@ def current_topology() -> dict[str, Any]:
     return {"diagnostics": [diag.model_dump() for diag in diagnostics], "topology": analysis.model_dump(mode="json")}
 
 
+@app.get("/api/circuit/placement-score")
+def current_placement_score() -> dict[str, Any]:
+    payload = current_scene_payload()
+    layout = payload.get("layout") or {}
+    canvas = layout.get("canvas", {}) if isinstance(layout, dict) else {}
+    return {
+        "diagnostics": payload.get("diagnostics", []),
+        "placement_optimizer": canvas.get("placement_optimizer"),
+        "layout_available": bool(layout),
+    }
+
+
 @app.get("/api/circuit/scene")
 def current_scene() -> dict[str, Any]:
     return current_scene_payload()
