@@ -37,6 +37,10 @@ cases:
     family: 04_repeated_groups
     type: good
     path: good/04_repeated_groups/multi_decoupling_with_rc_filters.cnet
+  - id: 05_relay_flyback_good
+    family: 05_relay_flyback
+    type: good
+    path: good/05_relay_flyback/circuit.cnet
   - id: 01_led_missing_resistor
     family: 01_led_resistor
     type: fault

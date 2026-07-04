@@ -1,0 +1,87 @@
+version: 1
+classification: negative
+circuits:
+  - id: 01_led_missing_resistor
+    name: Missing LED Resistor
+    path: test_circuits/faults/01_led_resistor/missing_resistor.cnet
+    topology_family: LED resistor
+    purpose: LED intentionally has no current-limiting resistor.
+    expected_diagnostics: [ERC_LED_NO_CURRENT_LIMIT]
+    render_allowed: true
+  - id: 01_led_reversed
+    name: Reversed LED
+    path: test_circuits/faults/01_led_resistor/reversed_led.cnet
+    topology_family: LED resistor
+    purpose: LED polarity is intentionally reversed.
+    expected_diagnostics: [ERC_LED_POLARITY_REVERSED]
+    render_allowed: true
+  - id: 01_led_terminals_shorted
+    name: LED Terminals Shorted
+    path: test_circuits/faults/01_led_resistor/led_terminals_shorted.cnet
+    topology_family: LED resistor
+    purpose: LED anode and cathode are intentionally tied together.
+    expected_diagnostics: [ERC_LED_TERMINALS_SHORTED]
+    render_allowed: true
+  - id: 01_led_power_ground_short
+    name: Power Ground Short
+    path: test_circuits/faults/01_led_resistor/power_ground_short.cnet
+    topology_family: LED resistor
+    purpose: VCC and GND are intentionally shorted by pin assignment.
+    expected_diagnostics: [ERC_POWER_GND_SHORT, VALIDATION_PIN_MULTIPLE_NETS]
+    render_allowed: false
+  - id: 01_led_invalid_pin
+    name: Invalid LED Pin
+    path: test_circuits/faults/01_led_resistor/invalid_pin.cnet
+    topology_family: LED resistor
+    purpose: Netlist intentionally references an unknown LED pin.
+    expected_diagnostics: [VALIDATION_UNKNOWN_PIN]
+    render_allowed: false
+  - id: 01_led_unknown_component
+    name: Unknown Component
+    path: test_circuits/faults/01_led_resistor/unknown_component.cnet
+    topology_family: LED resistor
+    purpose: Component type and references are intentionally unknown.
+    expected_diagnostics: [VALIDATION_UNKNOWN_COMPONENT, VALIDATION_UNKNOWN_REF, VALIDATION_UNKNOWN_REF]
+    render_allowed: false
+  - id: 02_mosfet_floating_gate
+    name: Floating MOSFET Gate
+    path: test_circuits/faults/02_mosfet_switch/floating_gate.cnet
+    topology_family: MOSFET low-side switch
+    purpose: MOSFET gate is intentionally left floating.
+    expected_diagnostics: [ERC_MOSFET_GATE_FLOATING]
+    render_allowed: true
+  - id: 02_mosfet_missing_pulldown
+    name: Missing MOSFET Pull-Down
+    path: test_circuits/faults/02_mosfet_switch/missing_gate_pulldown.cnet
+    topology_family: MOSFET low-side switch
+    purpose: MOSFET gate intentionally lacks a pull-down resistor.
+    expected_diagnostics: [ERC_MOSFET_GATE_NO_PULLDOWN]
+    render_allowed: true
+  - id: 02_mosfet_source_not_ground
+    name: MOSFET Source Not Ground
+    path: test_circuits/faults/02_mosfet_switch/source_not_ground.cnet
+    topology_family: MOSFET low-side switch
+    purpose: Low-side NMOS source is intentionally not tied to ground.
+    expected_diagnostics: [ERC_MOSFET_SOURCE_NOT_GROUND]
+    render_allowed: true
+  - id: 03_divider_midpoint_grounded
+    name: Divider Midpoint Grounded
+    path: test_circuits/faults/03_voltage_divider_adc/midpoint_shorted_to_ground.cnet
+    topology_family: voltage divider
+    purpose: Divider midpoint is intentionally shorted to ground.
+    expected_diagnostics: [ERC_DIVIDER_MIDPOINT_GROUNDED]
+    render_allowed: true
+  - id: 03_divider_adc_unconnected
+    name: Divider ADC Unconnected
+    path: test_circuits/faults/03_voltage_divider_adc/adc_unconnected.cnet
+    topology_family: voltage divider
+    purpose: Divider midpoint intentionally does not feed an MCU ADC/input pin.
+    expected_diagnostics: [ERC_ADC_PIN_UNCONNECTED]
+    render_allowed: true
+  - id: 03_divider_missing_bottom
+    name: Divider Missing Bottom Resistor
+    path: test_circuits/faults/03_voltage_divider_adc/missing_bottom_resistor.cnet
+    topology_family: voltage divider
+    purpose: Divider intentionally lacks the bottom resistor.
+    expected_diagnostics: [ERC_DIVIDER_BOTTOM_MISSING]
+    render_allowed: true

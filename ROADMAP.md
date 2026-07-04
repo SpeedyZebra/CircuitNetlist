@@ -16,7 +16,7 @@ Still intentionally limited to Milestone 1 scope:
 
 - No general-purpose placement optimizer.
 - No canonical scene-geometry/DRC refactor.
-- Flyback detection requires future diode/load library entries to become useful.
+- Flyback pattern inference remains lightweight and schematic-level.
 
 ## Milestone 1.1 - topology cleanup and regression integrity
 
@@ -177,3 +177,31 @@ Still intentionally limited to Milestone 3B scope:
 - Candidate search remains bounded local movement plus conservative passive rotation.
 - Electrical diagnostics are preserved by keeping the circuit graph immutable, not by adding a new ERC milestone.
 - TODO - execute and expand Playwright browser tests once local Node/npm configuration is working.
+
+## Milestone QA-1 - complete circuit inventory and zero-diagnostic quality gate
+
+Status: complete
+
+Implemented in this branch:
+
+- Complete inventory of physical `.cnet` files and embedded synthetic test netlists in `docs/circuit_inventory.md`.
+- Explicit clean and negative manifests in `test_circuits/clean_circuits.yaml` and `test_circuits/negative_circuits.yaml`.
+- Strict clean-circuit policy: every clean circuit must parse, validate, analyze topology, place, route, build a canonical scene, pass visual DRC and ERC, export SVG, and export PNG with zero diagnostics.
+- Strict negative-fixture policy: every fault circuit must produce exactly its expected diagnostic code multiset and no unrelated DRC/routing/placement/export noise.
+- New `circuit_netlist.diagnostics` helper for normalized diagnostic records and shared exact-code comparison.
+- New `python -m circuit_netlist.circuit_audit --all` quality-gate CLI.
+- Generated audit artifacts under ignored `output/circuit_audit/`: JSON report, Markdown report, SVG exports, and PNG exports.
+- Pytest coverage for all clean manifest circuits and all negative manifest circuits.
+- `BASIC_DIODE` and a clean relay-coil flyback driver fixture so the motor/relay flyback family is formally covered.
+- Regression manifest expanded to 22 legacy cases, including the relay/flyback fixture.
+- Fault fixture cleanup to remove unrelated single-pin routing warnings from negative tests.
+- Documentation in `docs/circuit_quality_gate.md`.
+
+Still intentionally limited to QA-1 scope:
+
+- No simulation engine, DC solver, SPICE export, solar/weather simulation, or battery simulation.
+- No Playwright execution or browser-test expansion in this milestone.
+- No new router architecture or placement architecture.
+- Embedded unit-test snippets remain pytest-owned synthetic circuits unless promoted into physical `.cnet` fixtures and manifests.
+- Deferred: Playwright execution and expansion.
+- Deferred: simulation engine.

@@ -57,6 +57,12 @@ circuits:
     expected_codes: []
     render_allowed: true
     expected_components: 10
+  good/05_relay_flyback/circuit.cnet:
+    parse: pass
+    validation: pass
+    expected_codes: []
+    render_allowed: true
+    expected_components: 7
 
   faults/01_led_resistor/missing_resistor.cnet:
     parse: pass

@@ -7,6 +7,7 @@ from time import perf_counter
 from typing import Any, Iterable
 
 from .component_library import ComponentLibrary
+from .diagnostics import diagnostic_code_counts
 from .geometry import absolute_pin_point, boxes_overlap, component_body_box, component_size, inflate_box, is_orientation_sensitive, segment_crosses_box, segments_collinear_overlap, visual_pin_side
 from .models import Circuit, Diagnostic, Layout, Placement, Severity
 from .router import ManhattanRouter
@@ -1042,7 +1043,7 @@ def _bend_count_by_net(segments_by_net: dict[str, list[tuple[int, int, int, int]
 
 
 def _diagnostic_counts(diagnostics: list[Diagnostic]) -> Counter[str]:
-    return Counter(diag.code or "" for diag in diagnostics if diag.code)
+    return diagnostic_code_counts(diagnostics)
 
 
 def _split_visual_diagnostics(diagnostics: list[Diagnostic], baseline_counts: Counter[str] | None) -> tuple[list[Diagnostic], list[Diagnostic]]:

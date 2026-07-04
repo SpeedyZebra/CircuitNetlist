@@ -12,6 +12,7 @@ NET VCC:
     V1.POS
     U1.VDD
     R_LED.1
+    Q1.S
 
 NET LED_ANODE:
     R_LED.2
@@ -29,9 +30,6 @@ NET GATE:
     R_GATE.2
     R_PULL.1
     Q1.G
-
-NET FLOATING_SOURCE [allow_single]:
-    Q1.S
 
 NET GND:
     V1.NEG

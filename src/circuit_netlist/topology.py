@@ -634,8 +634,10 @@ def _role_from_text(text: str) -> ComponentRole | None:
         return ComponentRole.SWITCH
     if "load" in normalized or "output" in normalized:
         return ComponentRole.LOAD
-    if normalized in {"timing", "feedback", "input", "pulldown", "pullup", "pull_down", "pull_up", "current_limit", "gate_resistor", "decoupling", "control_bypass"}:
+    if normalized in {"timing", "feedback", "input", "pulldown", "pullup", "pull_down", "pull_up", "current_limit", "gate_resistor", "decoupling", "control_bypass", "flyback"}:
         return ComponentRole.PASSIVE
+    if normalized in {"relay_coil", "motor"}:
+        return ComponentRole.LOAD
     return None
 
 
@@ -664,6 +666,8 @@ KNOWN_LOCAL_ROLE_INTENTS = {
     "signal_source",
     "reservoir",
     "filter",
+    "flyback",
+    "relay_coil",
     "supply",
     "timing",
 }

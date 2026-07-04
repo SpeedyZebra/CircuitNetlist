@@ -12,6 +12,7 @@ from typing import Any
 import yaml
 
 from .component_library import load_component_library
+from .diagnostics import compare_diagnostic_codes
 from .erc import ElectricalRuleChecker
 from .exporters import export_svg
 from .geometry import boxes_overlap, inflate_box, segment_crosses_box, segments_collinear_overlap
@@ -53,34 +54,6 @@ class CaseResult:
     calculations: list[dict[str, Any]] = field(default_factory=list)
     svg_path: str | None = None
     json_path: str | None = None
-
-
-def compare_diagnostic_codes(
-    expected_codes: list[str],
-    actual_codes: list[str],
-    allowed_codes: list[str] | None = None,
-) -> tuple[list[str], list[str], bool]:
-    """Compare diagnostic code multisets without suppressing any namespace."""
-    allowed = set(allowed_codes or [])
-    expected_counts = _code_counts(expected_codes)
-    actual_counts = _code_counts([code for code in actual_codes if code not in allowed])
-    missing: list[str] = []
-    unexpected: list[str] = []
-    for code in sorted(set(expected_counts) | set(actual_counts)):
-        expected_count = expected_counts.get(code, 0)
-        actual_count = actual_counts.get(code, 0)
-        if actual_count < expected_count:
-            missing.extend([code] * (expected_count - actual_count))
-        if actual_count > expected_count:
-            unexpected.extend([code] * (actual_count - expected_count))
-    return missing, unexpected, not missing and not unexpected
-
-
-def _code_counts(codes: list[str]) -> dict[str, int]:
-    counts: dict[str, int] = {}
-    for code in codes:
-        counts[code] = counts.get(code, 0) + 1
-    return counts
 
 
 def main(argv: list[str] | None = None) -> int:

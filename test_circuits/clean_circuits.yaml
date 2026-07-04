@@ -1,0 +1,82 @@
+version: 1
+classification: clean
+diagnostics: []
+circuits:
+  - id: example_solar_led
+    name: Solar LED Controller
+    path: examples/solar_led.cnet
+    source_kind: example
+    topology_family: solar LED / solar charger battery system
+    purpose: Solar charger, LiPo battery, MCU-controlled MOSFET LED load.
+  - id: example_inverting_op_amp
+    name: Inverting Op Amp
+    path: examples/inverting_op_amp.cnet
+    source_kind: example
+    topology_family: op-amp
+    purpose: Basic inverting amplifier with closed-loop gain -R2/R1.
+  - id: example_555_timer_50_duty_astable
+    name: 555 Timer 50% Duty Astable
+    path: examples/555_timer_50_duty_astable.cnet
+    source_kind: example
+    topology_family: 555 timer
+    purpose: 50% duty-cycle astable oscillator with output feedback.
+  - id: 01_led_resistor_good
+    name: LED Resistor
+    path: test_circuits/good/01_led_resistor/circuit.cnet
+    source_kind: regression
+    topology_family: LED resistor
+    purpose: Simple current-limited LED.
+  - id: 02_mosfet_switch_good
+    name: MOSFET Low-Side Switch
+    path: test_circuits/good/02_mosfet_switch/circuit.cnet
+    source_kind: regression
+    topology_family: MOSFET low-side switch
+    purpose: MCU gate drive, gate resistor, pull-down, NMOS-switched LED load.
+  - id: 03_voltage_divider_adc_good
+    name: Voltage Divider ADC
+    path: test_circuits/good/03_voltage_divider_adc/circuit.cnet
+    source_kind: regression
+    topology_family: voltage divider
+    purpose: Two-resistor divider feeding an MCU ADC pin.
+  - id: 04_multi_mosfet_2_channel
+    name: Repeated MOSFET 2 Channel
+    path: test_circuits/good/04_repeated_groups/multi_mosfet_2_channel.cnet
+    source_kind: regression
+    topology_family: repeated MOSFET channels
+    purpose: Two independent low-side MOSFET LED channels.
+  - id: 04_multi_mosfet_4_channel
+    name: Repeated MOSFET 4 Channel
+    path: test_circuits/good/04_repeated_groups/multi_mosfet_4_channel.cnet
+    source_kind: regression
+    topology_family: repeated MOSFET channels
+    purpose: Four independent low-side MOSFET LED channels.
+  - id: 04_multi_voltage_divider
+    name: Multiple Voltage Dividers
+    path: test_circuits/good/04_repeated_groups/multi_voltage_divider.cnet
+    source_kind: regression
+    topology_family: voltage divider
+    purpose: Multiple divider groups sharing supply rails.
+  - id: 04_multi_rc_filter
+    name: Multiple RC Filters
+    path: test_circuits/good/04_repeated_groups/multi_rc_filter.cnet
+    source_kind: regression
+    topology_family: RC filter
+    purpose: Multiple low-pass RC input filters.
+  - id: 04_multi_decoupling
+    name: Multiple Decoupling Capacitors
+    path: test_circuits/good/04_repeated_groups/multi_decoupling.cnet
+    source_kind: regression
+    topology_family: decoupling
+    purpose: Local and bulk rail capacitors around an MCU.
+  - id: 04_multi_decoupling_with_rc_filters
+    name: Decoupling Plus RC Filters
+    path: test_circuits/good/04_repeated_groups/multi_decoupling_with_rc_filters.cnet
+    source_kind: regression
+    topology_family: decoupling + RC
+    purpose: Mixed decoupling bank and repeated RC filters.
+  - id: 05_relay_flyback_good
+    name: Relay Flyback Driver
+    path: test_circuits/good/05_relay_flyback/circuit.cnet
+    source_kind: regression
+    topology_family: motor or relay with flyback
+    purpose: Low-side NMOS relay-coil driver with flyback diode.

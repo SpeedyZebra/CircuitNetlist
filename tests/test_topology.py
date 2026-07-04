@@ -234,9 +234,21 @@ def test_rc_lowpass_detection_works() -> None:
     assert rc[0].metadata["capacitor"] == "CF"
 
 
-def test_flyback_detection_is_available_but_library_has_no_diode_component() -> None:
-    _, _, analysis = analyze_text("CIRCUIT NoFlyback\nCOMPONENT L1 BASIC_INDUCTOR value=10mH\nNET A:\n L1.1\nNET B:\n L1.2\n")
-    assert patterns(analysis, PatternType.FLYBACK_DIODE) == []
+def test_flyback_detection_works_with_basic_diode() -> None:
+    _, _, analysis = analyze_text("""CIRCUIT Flyback
+COMPONENT L1 BASIC_INDUCTOR value=10mH
+COMPONENT D1 BASIC_DIODE
+NET VCC:
+    L1.1
+    D1.K
+NET SWITCH:
+    L1.2
+    D1.A
+""")
+    flybacks = patterns(analysis, PatternType.FLYBACK_DIODE)
+    assert len(flybacks) == 1
+    assert flybacks[0].metadata["diode"] == "D1"
+    assert flybacks[0].metadata["load"] == "L1"
 
 
 def test_renamed_solar_layout_preserves_relative_topology() -> None:

@@ -26,6 +26,14 @@
   body: {renderer: inductor, width: 140, height: 80, pin_pitch: 40}
   parameters: {value: {required: true, unit: H}, role: {required: false}}
   pins: *twopin
+- id: BASIC_DIODE
+  name: Diode
+  category: Basic
+  body: {renderer: diode, width: 140, height: 80, pin_pitch: 40}
+  parameters: {part: {required: false}, role: {required: false}}
+  pins:
+    - {number: "1", name: A, aliases: [ANODE], side: left, position: 1, electrical_type: passive}
+    - {number: "2", name: K, aliases: [CATHODE], side: right, position: 1, electrical_type: passive}
 - id: BASIC_OP_AMP
   name: Operational Amplifier
   category: Basic
