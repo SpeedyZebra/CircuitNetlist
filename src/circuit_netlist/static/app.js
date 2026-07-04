@@ -1,6 +1,6 @@
 const DRAG_THRESHOLD_PX = 5;
 const NON_COMPONENT_DRAG_KINDS = new Set(["pin", "wire", "wire_stub", "junction", "net_label", "net_label_endpoint", "power_symbol", "ground_symbol", "power_label", "ground_label"]);
-let state = { circuit: null, layout: null, scene: null, sceneById: new Map(), svg: "", scale: 1, panX: 0, panY: 0, selected: null, drag: null, suppressClick: false, current: null, catalog: null, expected: null, localFile: null, localLayoutFile: null };
+let state = { circuit: null, layout: null, scene: null, sceneById: new Map(), components: [], svg: "", scale: 1, panX: 0, panY: 0, selected: null, drag: null, suppressClick: false, current: null, catalog: null, expected: null, localFile: null, localLayoutFile: null };
 const canvas = document.querySelector("#canvas");
 const statusEl = document.querySelector("#status");
 
@@ -15,6 +15,7 @@ async function loadAll({ fresh = false } = {}) {
     state.svg = circuit.svg;
     state.current = circuit.current || null;
     state.expected = circuit.expected || null;
+    state.components = components.components || [];
     renderLibrary(components.components || []);
     applySchematic(circuit);
     statusEl.textContent = `${state.circuit?.name || "Circuit"} loaded${fresh ? " from generated layout" : ""}`;
@@ -274,13 +275,19 @@ function selectSceneElement(evt) {
   if (sceneElement.component_ref || el.dataset.ref) return selectComponentElement(el, sceneElement);
 }
 
-function selectComponentElement(el, sceneElement = {}) {
+async function selectComponentElement(el, sceneElement = {}) {
   clearSelection();
   const ref = sceneElement.component_ref || el.dataset.ref;
   document.querySelector(`#component-${cssSafe(ref)}`)?.classList.add("selected");
   state.selected = sceneElement.id || el.dataset.sceneId || ref;
-  const comp = state.circuit.components.find(c => c.ref === ref);
-  document.querySelector("#properties").innerHTML = rows({ Reference: comp.ref, Type: comp.component_id, Parameters: JSON.stringify(comp.parameters) });
+  document.querySelector("#properties").innerHTML = rows({ Reference: ref, Status: "Loading component details..." });
+  try {
+    const detail = await fetchJson(`/api/circuit/component-details/${encodeURIComponent(ref)}?t=${Date.now()}`, { cache: "no-store" });
+    renderComponentDetails(detail);
+  } catch (err) {
+    const comp = state.circuit.components.find(c => c.ref === ref) || {};
+    document.querySelector("#properties").innerHTML = rows({ Reference: comp.ref || ref, Type: comp.component_id || "", Status: err.message });
+  }
 }
 
 function selectPinElement(el, sceneElement = {}) {
@@ -291,12 +298,18 @@ function selectPinElement(el, sceneElement = {}) {
   document.querySelector("#properties").innerHTML = rows({ Component: ref, Pin: `${pinNumber} ${pinName}`, Type: p.electricalType || "", Net: findPinNet(ref, pinName) || "" });
 }
 
-function selectNetElement(el, sceneElement = {}) {
+async function selectNetElement(el, sceneElement = {}) {
   const net = sceneElement.net_name || el.dataset.net || el.closest("[data-net]")?.dataset.net;
   const group = document.querySelector(`#net-${cssSafe(net)}`);
   const style = group?.dataset.renderStyle || "local_wire";
   document.querySelectorAll(".net").forEach(n => n.classList.toggle("highlight", n.dataset.net === net));
-  document.querySelector("#properties").innerHTML = rows({ Net: net, "Render style": style });
+  document.querySelector("#properties").innerHTML = rows({ Net: net, "Render style": style, Status: "Loading net details..." });
+  try {
+    const detail = await fetchJson(`/api/circuit/net-details/${encodeURIComponent(net)}?t=${Date.now()}`, { cache: "no-store" });
+    renderNetDetails(detail);
+  } catch (err) {
+    document.querySelector("#properties").innerHTML = rows({ Net: net, "Render style": style, Status: err.message });
+  }
   statusEl.textContent = `Selected net ${net}`;
 }
 
@@ -308,6 +321,91 @@ function findPinNet(ref, pinName) {
 
 function rows(obj) {
   return Object.entries(obj).map(([k, v]) => `<div class="prop-row"><strong>${k}</strong><br>${String(v ?? "")}</div>`).join("");
+}
+
+function renderComponentDetails(detail) {
+  const params = Object.entries(detail.parameters || {}).map(([key, value]) => `${escapeHtml(key)}=${escapeHtml(value)}`).join(", ") || "none";
+  const patterns = (detail.topology_patterns || []).map(pattern => escapeHtml(pattern.type)).join(", ") || "none";
+  const brief = [detail.summary, detail.function, detail.common_use].filter(Boolean).map(escapeHtml).join("<br>");
+  const notes = [detail.notes, detail.warnings].filter(Boolean).map(escapeHtml).join("<br>");
+  document.querySelector("#properties").innerHTML = `
+    <div class="prop-title">${escapeHtml(detail.ref)} ${escapeHtml(detail.name || detail.component_id)}</div>
+    ${brief ? `<div class="prop-row">${brief}</div>` : ""}
+    ${rows({
+      "Component ID": detail.component_id,
+      Category: detail.category,
+      Value: detail.value || "",
+      Role: detail.role || "",
+      Package: detail.package || "",
+      Orientation: detail.orientation ?? "",
+      "Metadata status": detail.verified_status || "",
+      "Topology role": detail.topology_role || "",
+      "Topology patterns": patterns,
+      Parameters: params
+    })}
+    ${notes ? `<div class="prop-row"><strong>Notes</strong><br>${notes}</div>` : ""}
+    <div class="prop-row"><strong>Pins</strong>${pinTable(detail.pins || [])}</div>
+  `;
+}
+
+function pinTable(pins) {
+  if (!pins.length) return `<div class="muted">No pin metadata</div>`;
+  return `
+    <table class="pin-table">
+      <thead><tr><th>#</th><th>Name</th><th>Type</th><th>Net</th><th>Description</th></tr></thead>
+      <tbody>${pins.map(pin => `
+        <tr>
+          <td>${escapeHtml(pin.number)}</td>
+          <td>${escapeHtml(pin.name)}</td>
+          <td>${escapeHtml(pin.electrical_type)}</td>
+          <td>${escapeHtml(pin.connected_net || "")}</td>
+          <td>${escapeHtml(pin.description || "")}</td>
+        </tr>
+      `).join("")}</tbody>
+    </table>
+  `;
+}
+
+function renderNetDetails(detail) {
+  const selected = detail.manual_override || "auto";
+  const options = [
+    ["auto", "Auto"],
+    ["direct", "Direct wire"],
+    ["label", "Net labels"],
+    ["power_symbol", "Power symbols"]
+  ];
+  document.querySelector("#properties").innerHTML = `
+    <div class="prop-title">Net ${escapeHtml(detail.net_name)}</div>
+    ${rows({
+      "Endpoint count": detail.endpoint_count,
+      "Resolved style": detail.resolved_route_style,
+      "Manual override": detail.manual_override || "auto",
+      "Auto reason": detail.auto_reason || "",
+      "Estimated direct length": detail.route_style_debug?.estimated_direct_length ?? "",
+      "Estimated direct bends": detail.route_style_debug?.estimated_direct_bends ?? ""
+    })}
+    <div class="prop-row">
+      <label for="route-style-select"><strong>Route style</strong></label><br>
+      <select id="route-style-select" data-net="${escapeHtml(detail.net_name)}">
+        ${options.map(([value, label]) => `<option value="${value}" ${selected === value ? "selected" : ""}>${label}</option>`).join("")}
+      </select>
+    </div>
+    <div class="prop-row"><strong>Endpoints</strong><br>${(detail.endpoints || []).map(endpoint => `${escapeHtml(endpoint.component_ref)}.${escapeHtml(endpoint.pin_name)}`).join("<br>")}</div>
+  `;
+  document.querySelector("#route-style-select")?.addEventListener("change", evt => changeNetRouteStyle(evt.target.dataset.net, evt.target.value));
+}
+
+async function changeNetRouteStyle(net, routeStyle) {
+  if (!state.layout) return;
+  statusEl.textContent = `Changing ${net} route style...`;
+  const payload = await fetchJson("/api/layout/net-route-style", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ net_name: net, route_style: routeStyle, layout: state.layout })
+  }, 20000);
+  applySchematic(payload, { fit: false });
+  if (state.current) state.current.layout_dirty = true;
+  statusEl.textContent = `${net} route style set to ${routeStyle}`;
 }
 
 function clearSelection() {

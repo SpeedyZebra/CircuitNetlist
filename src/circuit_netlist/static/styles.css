@@ -31,7 +31,7 @@ body {
   border-bottom: 1px solid var(--line);
 }
 .status { border-top: 1px solid var(--line); border-bottom: 0; color: var(--muted); }
-button, input {
+button, input, select {
   background: var(--panel-2);
   border: 1px solid var(--line);
   color: var(--text);
@@ -73,6 +73,27 @@ h2 { margin: 0 0 10px; font-size: 14px; color: var(--muted); font-weight: 600; }
   border-bottom: 1px solid #263240;
   color: var(--muted);
 }
+.prop-title {
+  padding: 8px;
+  border-bottom: 1px solid #263240;
+  color: var(--accent);
+  font-weight: 700;
+}
+.pin-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 6px;
+  font-size: 12px;
+}
+.pin-table th,
+.pin-table td {
+  border-bottom: 1px solid #263240;
+  padding: 4px 3px;
+  text-align: left;
+  vertical-align: top;
+}
+.pin-table th { color: var(--accent); font-weight: 600; }
+#route-style-select { width: 100%; margin-top: 4px; }
 .diag.WARNING { color: var(--warn); }
 .diag.ERROR, .diag.FATAL { color: var(--error); }
 

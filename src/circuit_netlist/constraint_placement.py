@@ -484,6 +484,7 @@ class ConstraintPlacementOptimizer:
         budget_reached = False
         budget_reason: str | None = None
         fast_path: str | None = None
+        budget_start = perf_counter()
 
         if self.config.mode not in {"optimize", "score_only"}:
             fast_path = "optimizer_off"
@@ -517,7 +518,7 @@ class ConstraintPlacementOptimizer:
                     budget_reached = True
                     budget_reason = "MAX_ROUTE_VALIDATIONS"
                     break
-                if (perf_counter() - start) * 1000 >= self.config.max_optimization_time_ms:
+                if (perf_counter() - budget_start) * 1000 >= self.config.max_optimization_time_ms:
                     budget_reached = True
                     budget_reason = "MAX_OPTIMIZATION_TIME_MS"
                     break

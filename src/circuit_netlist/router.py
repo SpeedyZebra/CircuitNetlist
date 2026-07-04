@@ -7,10 +7,10 @@ from typing import Protocol
 
 from .component_library import ComponentLibrary
 from .geometry import absolute_pin_point, component_body_box, component_size, visual_pin_side
-from .models import Circuit, ComponentDefinition, Layout, Placement, RoutedNet
+from .models import Circuit, ComponentDefinition, Layout, NetRouteStyle, Placement, RoutedNet
 
 GridEdge = tuple[tuple[int, int], tuple[int, int]]
-POWER_NET_NAMES = {"GND", "AGND", "DGND", "PGND", "VCC", "VDD", "VBAT", "3V3", "5V", "12V"}
+POWER_NET_NAMES = {"GND", "AGND", "DGND", "PGND", "VCC", "VDD", "VSS", "VEE", "VBAT", "3V3", "5V", "12V", "-12V", "+12V", "+5V", "+3V3", "V+", "V-"}
 LABEL_PREFERRED_NETS = {"SUN_SENSE", "BAT_SENSE", "LED_ENABLE", "LED_ANODE", "LED_SWITCH", "PANEL_POS"}
 
 
@@ -29,13 +29,14 @@ class ManhattanRouter:
         routes: list[RoutedNet] = []
         ref_to_id = {component.ref: component.component_id for component in circuit.components}
         obstacles = self._obstacles(circuit, library, layout)
-        body_obstacles = self._body_obstacles(circuit, library, layout)
+        body_obstacles_by_ref = self._body_obstacles_by_ref(circuit, library, layout)
+        body_obstacles = list(body_obstacles_by_ref.values())
         bounds = self._bounds(layout)
         used_edges: set[GridEdge] = set()
         for net in sorted(circuit.nets, key=lambda item: (len(item.pins), item.name)):
             pin_points: list[tuple[tuple[int, int], str]] = []
-            render_style = self._render_style(net.name, len(net.pins), layout)
-            routed = RoutedNet(name=net.name, render_style=render_style)
+            endpoint_refs: list[str] = []
+            routed = RoutedNet(name=net.name)
             for pinref in net.pins:
                 definition = library.get(ref_to_id.get(pinref.component_ref, ""))
                 placement = layout.components.get(pinref.component_ref)
@@ -46,6 +47,7 @@ class ManhattanRouter:
                 pin_point = absolute_pin_point(definition, placement, pin)
                 side = visual_pin_side(definition, pin, placement)
                 pin_points.append((pin_point, side))
+                endpoint_refs.append(pinref.component_ref)
                 routed.endpoints.append(
                     {
                         "component_ref": pinref.component_ref,
@@ -56,6 +58,10 @@ class ManhattanRouter:
                         "y": pin_point[1],
                     }
                 )
+            decision = self._route_style_decision(net.name, pin_points, endpoint_refs, layout, body_obstacles_by_ref)
+            render_style = str(decision["render_style"])
+            routed.render_style = render_style
+            routed.metadata["route_style"] = {key: value for key, value in decision.items() if key != "render_style"}
             if len(pin_points) >= 2:
                 if render_style == "power_symbol":
                     # Power connectivity is represented with local symbols at each endpoint.
@@ -76,30 +82,32 @@ class ManhattanRouter:
                     self._route_rail_net(net.name, pin_points, routed, used_edges, obstacles, body_obstacles, bounds)
                     routes.append(routed)
                     continue
+                route_edges: set[GridEdge] = set()
                 escaped_points = [(pin_point, self._choose_escape_point(pin_point, side, used_edges)) for pin_point, side in pin_points]
                 route_points = [external for _, external in escaped_points]
                 root = self._rail_point(net.name, route_points) if net.name in {"GND", "VBAT", "VDD", "VCC", "PANEL_POS"} else route_points[0]
                 root = self._nearest_free(root, obstacles, bounds)
                 for pin_point, external in escaped_points:
                     escape_segment = (pin_point[0], pin_point[1], external[0], external[1])
-                    escape_segments = self._detour_overlaps([escape_segment], used_edges, body_obstacles)
+                    escape_segments = self._detour_overlaps([escape_segment], used_edges - route_edges, body_obstacles)
                     routed.segments.extend(escape_segments)
                     for segment in escape_segments:
                         self._reserve_segment(segment, used_edges)
+                        self._reserve_segment(segment, route_edges)
                     if external == root:
                         continue
-                    path = self._astar(root, external, obstacles, bounds, used_edges)
+                    path = self._astar(root, external, obstacles, bounds, used_edges - route_edges)
                     if path:
                         path_segments = self._path_to_segments(path)
                         path_segments = self._connect_exact_route_endpoints(root, external, path, path_segments)
-                        path_segments = self._detour_overlaps(path_segments, used_edges, body_obstacles)
+                        path_segments = self._detour_overlaps(path_segments, used_edges - route_edges, body_obstacles)
                         routed.segments.extend(path_segments)
                         for segment in path_segments:
                             self._reserve_segment(segment, used_edges)
+                            self._reserve_segment(segment, route_edges)
                     else:
                         routed.segments.extend(self._unrouted_fallback(root, external))
                         routed.warnings.append(f"Could not find obstacle-free route for {net.name}")
-                routed.labels.append((root[0] + 8, root[1] - 8, net.name))
                 counts = Counter()
                 for x1, y1, x2, y2 in routed.segments:
                     counts[(x1, y1)] += 1
@@ -111,19 +119,135 @@ class ManhattanRouter:
             routes.append(routed)
         return routes
 
-    def _render_style(self, net_name: str, pin_count: int, layout: Layout) -> str:
-        override = layout.nets.get(net_name, {}).get("render_style")
-        if override in {"local_wire", "net_label", "power_symbol"}:
-            return override
+    def _route_style_decision(
+        self,
+        net_name: str,
+        pin_points: list[tuple[tuple[int, int], str]],
+        endpoint_refs: list[str],
+        layout: Layout,
+        body_obstacles_by_ref: dict[str, tuple[int, int, int, int]],
+    ) -> dict[str, object]:
+        manual = self._manual_route_style(net_name, layout)
+        endpoint_count = len(pin_points)
+        estimated_length = self._estimated_direct_length([point for point, _ in pin_points])
+        estimated_bends = self._estimated_direct_bends([point for point, _ in pin_points])
+        direct_status = self._direct_candidate_status(pin_points, endpoint_refs, body_obstacles_by_ref)
+        if manual and manual != NetRouteStyle.AUTO:
+            return {
+                "selected_style": manual.value,
+                "manual_override": manual.value,
+                "reason": "manual layout override",
+                "endpoint_count": endpoint_count,
+                "estimated_direct_length": estimated_length,
+                "estimated_direct_bends": estimated_bends,
+                "direct_drc_status": direct_status,
+                "label_drc_status": "manual_override",
+                "render_style": self._render_style_for_route_style(manual),
+            }
+        auto = self._auto_route_style(net_name, pin_points, direct_status)
+        return {
+            "selected_style": auto.value,
+            "manual_override": None,
+            "reason": self._auto_route_style_reason(net_name, pin_points, auto),
+            "endpoint_count": endpoint_count,
+            "estimated_direct_length": estimated_length,
+            "estimated_direct_bends": estimated_bends,
+            "direct_drc_status": direct_status,
+            "label_drc_status": "available" if auto != NetRouteStyle.DIRECT else "not_required",
+            "render_style": self._render_style_for_route_style(auto),
+        }
+
+    def _manual_route_style(self, net_name: str, layout: Layout) -> NetRouteStyle | None:
+        data = layout.nets.get(net_name, {})
+        route_style = data.get("route_style")
+        if route_style in {style.value for style in NetRouteStyle}:
+            return NetRouteStyle(route_style)
+        render_style = data.get("render_style")
+        if render_style == "local_wire":
+            return NetRouteStyle.DIRECT
+        if render_style == "net_label":
+            return NetRouteStyle.LABEL
+        if render_style == "power_symbol":
+            return NetRouteStyle.POWER_SYMBOL
+        return None
+
+    def _auto_route_style(self, net_name: str, pin_points: list[tuple[tuple[int, int], str]], direct_status: str = "clean_estimate") -> NetRouteStyle:
+        endpoint_count = len(pin_points)
+        points = [point for point, _ in pin_points]
         if net_name in POWER_NET_NAMES:
-            return "power_symbol"
-        if pin_count == 2:
-            return "local_wire"
+            return NetRouteStyle.POWER_SYMBOL
+        if endpoint_count <= 1:
+            return NetRouteStyle.DIRECT
+        direct_is_clear = direct_status == "clean_estimate"
+        span_x = max(point[0] for point in points) - min(point[0] for point in points)
+        span_y = max(point[1] for point in points) - min(point[1] for point in points)
+        estimated_length = self._estimated_direct_length(points)
+        estimated_bends = self._estimated_direct_bends(points)
+        if endpoint_count == 2:
+            return NetRouteStyle.DIRECT if direct_is_clear and estimated_length <= 900 and estimated_bends <= 2 else NetRouteStyle.LABEL
+        if endpoint_count == 3 and direct_is_clear and span_x <= 700 and span_y <= 520 and estimated_bends <= 4:
+            return NetRouteStyle.DIRECT
         if net_name in LABEL_PREFERRED_NETS:
-            return "net_label"
-        if pin_count > 2:
+            return NetRouteStyle.LABEL
+        if endpoint_count > 3:
+            return NetRouteStyle.LABEL
+        return NetRouteStyle.DIRECT if direct_is_clear and estimated_length <= 900 else NetRouteStyle.LABEL
+
+    def _direct_candidate_status(
+        self,
+        pin_points: list[tuple[tuple[int, int], str]],
+        endpoint_refs: list[str],
+        body_obstacles_by_ref: dict[str, tuple[int, int, int, int]],
+    ) -> str:
+        points = [point for point, _ in pin_points]
+        if len(points) <= 1:
+            return "clean_estimate"
+        ignored_refs = set(endpoint_refs)
+        body_obstacles = [box for ref, box in body_obstacles_by_ref.items() if ref not in ignored_refs]
+        root = points[0]
+        for point in points[1:]:
+            if any(self._segment_crosses_obstacle(segment, body_obstacles) for segment in self._estimated_direct_segments(root, point)):
+                return "blocked_by_component_estimate"
+        return "clean_estimate"
+
+    def _estimated_direct_segments(self, root: tuple[int, int], point: tuple[int, int]) -> list[tuple[int, int, int, int]]:
+        if root[0] == point[0] or root[1] == point[1]:
+            return [(root[0], root[1], point[0], point[1])]
+        horizontal_first = [(root[0], root[1], point[0], root[1]), (point[0], root[1], point[0], point[1])]
+        vertical_first = [(root[0], root[1], root[0], point[1]), (root[0], point[1], point[0], point[1])]
+        return min((horizontal_first, vertical_first), key=lambda segments: sum(abs(x1 - x2) + abs(y1 - y2) for x1, y1, x2, y2 in segments))
+
+    def _auto_route_style_reason(self, net_name: str, pin_points: list[tuple[tuple[int, int], str]], style: NetRouteStyle) -> str:
+        endpoint_count = len(pin_points)
+        if net_name in POWER_NET_NAMES:
+            return "global power or ground net"
+        if endpoint_count == 2 and style == NetRouteStyle.DIRECT:
+            return "simple two-endpoint net"
+        if endpoint_count == 3 and style == NetRouteStyle.DIRECT:
+            return "local three-endpoint net"
+        if net_name in LABEL_PREFERRED_NETS:
+            return "named sense/control net prefers labels"
+        if endpoint_count > 3:
+            return "fanout net prefers labels"
+        return "readability heuristic"
+
+    def _render_style_for_route_style(self, route_style: NetRouteStyle) -> str:
+        if route_style == NetRouteStyle.POWER_SYMBOL:
+            return "power_symbol"
+        if route_style == NetRouteStyle.LABEL:
             return "net_label"
         return "local_wire"
+
+    def _estimated_direct_length(self, points: list[tuple[int, int]]) -> int:
+        if len(points) < 2:
+            return 0
+        root = points[0]
+        return sum(abs(root[0] - point[0]) + abs(root[1] - point[1]) for point in points[1:])
+
+    def _estimated_direct_bends(self, points: list[tuple[int, int]]) -> int:
+        if len(points) < 2:
+            return 0
+        return sum(0 if points[0][0] == point[0] or points[0][1] == point[1] else 1 for point in points[1:])
 
     def _route_rail_net(
         self,
@@ -246,13 +370,16 @@ class ManhattanRouter:
         )
 
     def _body_obstacles(self, circuit: Circuit, library: ComponentLibrary, layout: Layout) -> list[tuple[int, int, int, int]]:
-        boxes: list[tuple[int, int, int, int]] = []
+        return list(self._body_obstacles_by_ref(circuit, library, layout).values())
+
+    def _body_obstacles_by_ref(self, circuit: Circuit, library: ComponentLibrary, layout: Layout) -> dict[str, tuple[int, int, int, int]]:
+        boxes: dict[str, tuple[int, int, int, int]] = {}
         for instance in circuit.components:
             definition = library.get(instance.component_id)
             placement = layout.components.get(instance.ref)
             if not definition or not placement:
                 continue
-            boxes.append(tuple(int(value) for value in component_body_box(definition, placement)))
+            boxes[instance.ref] = tuple(int(value) for value in component_body_box(definition, placement))
         return boxes
 
     def _bounds(self, layout: Layout) -> tuple[int, int, int, int]:

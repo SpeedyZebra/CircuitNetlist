@@ -6,24 +6,34 @@
   pins: &ledpins
     - {number: "1", name: A, aliases: [ANODE], side: left, position: 1, electrical_type: passive}
     - {number: "2", name: K, aliases: [CATHODE], side: right, position: 1, electrical_type: passive}
+  metadata: &ledmeta
+    verified_status: generic
+    summary: Light-emitting diode. It conducts from anode to cathode and emits light when forward biased.
+    warnings: Most LEDs need current limiting unless they are internally regulated.
+    pins:
+      A: {description: Anode; connect toward the positive side of the LED current path.}
+      K: {description: Cathode; connect toward the return or switched low side.}
 - id: LIGHT_LED_RED
   name: Red LED
   category: Lighting
   body: {renderer: led, width: 140, height: 100, pin_pitch: 40}
   parameters: {vf: {required: false, unit: V}, current: {required: false, unit: A}, internally_regulated: {required: false}}
   pins: *ledpins
+  metadata: *ledmeta
 - id: LIGHT_LED_GREEN
   name: Green LED
   category: Lighting
   body: {renderer: led, width: 140, height: 100, pin_pitch: 40}
   parameters: {vf: {required: false, unit: V}, current: {required: false, unit: A}, internally_regulated: {required: false}}
   pins: *ledpins
+  metadata: *ledmeta
 - id: LIGHT_LED_BLUE
   name: Blue LED
   category: Lighting
   body: {renderer: led, width: 140, height: 100, pin_pitch: 40}
   parameters: {vf: {required: false, unit: V}, current: {required: false, unit: A}, internally_regulated: {required: false}}
   pins: *ledpins
+  metadata: *ledmeta
 - id: LIGHT_LED_RGB_ADDRESSABLE
   name: Addressable RGB LED
   category: Lighting
@@ -33,3 +43,11 @@
     - {number: "2", name: GND, aliases: [], side: left, position: 3, electrical_type: power_in}
     - {number: "3", name: DIN, aliases: [], side: right, position: 1, electrical_type: input}
     - {number: "4", name: DOUT, aliases: [], side: right, position: 3, electrical_type: output}
+  metadata:
+    verified_status: generic
+    summary: Addressable RGB LED block with power, ground, and serial data pins.
+    pins:
+      VDD: {description: LED logic/power supply.}
+      GND: {description: Ground reference.}
+      DIN: {description: Serial data input.}
+      DOUT: {description: Serial data output to the next LED.}

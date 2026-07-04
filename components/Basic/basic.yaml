@@ -6,12 +6,26 @@
   pins: &twopin
     - {number: "1", name: "1", aliases: [A], side: left, position: 1, electrical_type: passive}
     - {number: "2", name: "2", aliases: [B], side: right, position: 1, electrical_type: passive}
+  metadata:
+    verified_status: generic
+    summary: Two-terminal passive used to control current and voltage.
+    function: Limits current, forms dividers, creates pull-ups/pull-downs, or sets RC timing.
+    pins:
+      "1": {description: First passive terminal.}
+      "2": {description: Second passive terminal.}
 - id: BASIC_CAPACITOR_CERAMIC
   name: Ceramic Capacitor
   category: Basic
   body: {renderer: capacitor, width: 140, height: 80, pin_pitch: 40}
   parameters: {value: {required: true, unit: F}, role: {required: false}}
   pins: *twopin
+  metadata:
+    verified_status: generic
+    summary: Non-polarized capacitor for filtering, bypass, timing, and coupling.
+    function: Stores charge and shunts changing signals according to frequency.
+    pins:
+      "1": {description: First passive terminal.}
+      "2": {description: Second passive terminal.}
 - id: BASIC_CAPACITOR_POLARIZED
   name: Polarized Capacitor
   category: Basic
@@ -20,12 +34,26 @@
   pins:
     - {number: "1", name: POS, aliases: ["+"], side: left, position: 1, electrical_type: passive}
     - {number: "2", name: NEG, aliases: ["-"], side: right, position: 1, electrical_type: passive}
+  metadata:
+    verified_status: generic
+    summary: Polarized capacitor for bulk energy storage and low-frequency filtering.
+    warnings: Observe polarity; reverse voltage can damage real capacitors.
+    pins:
+      POS: {description: Positive terminal.}
+      NEG: {description: Negative terminal.}
 - id: BASIC_INDUCTOR
   name: Inductor
   category: Basic
   body: {renderer: inductor, width: 140, height: 80, pin_pitch: 40}
   parameters: {value: {required: true, unit: H}, role: {required: false}}
   pins: *twopin
+  metadata:
+    verified_status: generic
+    summary: Two-terminal inductive element used for coils, filters, motors, and relay windings.
+    function: Stores energy in a magnetic field and resists current changes.
+    pins:
+      "1": {description: First coil terminal.}
+      "2": {description: Second coil terminal.}
 - id: BASIC_DIODE
   name: Diode
   category: Basic
@@ -34,6 +62,13 @@
   pins:
     - {number: "1", name: A, aliases: [ANODE], side: left, position: 1, electrical_type: passive}
     - {number: "2", name: K, aliases: [CATHODE], side: right, position: 1, electrical_type: passive}
+  metadata:
+    verified_status: generic
+    summary: Two-terminal diode that conducts primarily from anode to cathode.
+    common_use: Flyback clamp across relay coils, polarity steering, and simple rectification.
+    pins:
+      A: {description: Anode; conventional current enters here when forward biased.}
+      K: {description: Cathode; bar side of the diode symbol.}
 - id: BASIC_OP_AMP
   name: Operational Amplifier
   category: Basic
@@ -45,6 +80,16 @@
     - {number: "3", name: OUT, aliases: [OUTPUT], side: right, position: 3, electrical_type: output}
     - {number: "4", name: V+, aliases: [VCC, VDD, VP], side: top, position: 4, electrical_type: power_in}
     - {number: "5", name: V-, aliases: [VEE, VSS, VN], side: bottom, position: 4, electrical_type: power_in}
+  metadata:
+    verified_status: generic
+    summary: Generic operational amplifier symbol for schematic-level analog circuits.
+    function: Amplifies the voltage difference between IN+ and IN- according to feedback.
+    pins:
+      IN-: {description: Inverting input.}
+      IN+: {description: Non-inverting input.}
+      OUT: {description: Amplifier output.}
+      V+: {description: Positive supply rail.}
+      V-: {description: Negative supply rail or ground for single-supply use.}
 - id: BASIC_555_TIMER
   name: 555 Timer
   category: Basic
@@ -59,6 +104,20 @@
     - {number: "6", name: THRESH, aliases: [THRESHOLD], side: left, position: 4, electrical_type: input}
     - {number: "7", name: DISCH, aliases: [DISCHARGE], side: left, position: 2, electrical_type: open_drain}
     - {number: "8", name: VCC, aliases: [VDD, V+], side: top, position: 2, electrical_type: power_in}
+  metadata:
+    verified_status: generic
+    summary: Timer/oscillator IC commonly used for monostable and astable timing circuits.
+    function: Compares timing-capacitor voltage against internal thresholds and drives OUT/DISCH.
+    common_use: Oscillators, pulse stretching, delays, LED flashers, tone generators.
+    pins:
+      VCC: {description: Positive supply.}
+      GND: {description: Ground reference.}
+      TRIG: {description: Starts timing when pulled low.}
+      THRESH: {description: Ends timing when capacitor voltage reaches threshold.}
+      DISCH: {description: Open-drain discharge transistor for the timing capacitor.}
+      OUT: {description: Output waveform pin.}
+      RESET: {description: Active-low reset input.}
+      CTRL: {description: Control-voltage input, often bypassed to ground.}
 - id: BASIC_NMOS
   name: N-MOSFET
   category: Basic
@@ -68,7 +127,17 @@
     - {number: "1", name: G, aliases: [GATE], side: left, position: 1, electrical_type: input}
     - {number: "2", name: D, aliases: [DRAIN], side: top, position: 2, electrical_type: passive}
     - {number: "3", name: S, aliases: [SOURCE], side: bottom, position: 2, electrical_type: passive}
-  metadata: {mosfet_mode: enhancement, show_body_diode: false, generic_symbol: true}
+  metadata:
+    verified_status: generic
+    mosfet_mode: enhancement
+    show_body_diode: false
+    generic_symbol: true
+    summary: Voltage-controlled transistor. Gate voltage controls drain-source conduction.
+    warnings: Gate should normally have a defined startup state via pull-up or pull-down.
+    pins:
+      G: {description: Gate control input.}
+      D: {description: Drain terminal, often connected to the switched load.}
+      S: {description: Source terminal, often connected to ground in low-side switching.}
 - id: BASIC_PMOS
   name: P-MOSFET
   category: Basic
@@ -78,7 +147,16 @@
     - {number: "1", name: G, aliases: [GATE], side: left, position: 1, electrical_type: input}
     - {number: "2", name: D, aliases: [DRAIN], side: bottom, position: 2, electrical_type: passive}
     - {number: "3", name: S, aliases: [SOURCE], side: top, position: 2, electrical_type: passive}
-  metadata: {mosfet_mode: enhancement, show_body_diode: false, generic_symbol: true}
+  metadata:
+    verified_status: generic
+    mosfet_mode: enhancement
+    show_body_diode: false
+    generic_symbol: true
+    summary: P-channel MOSFET symbol for high-side or complementary switching.
+    pins:
+      G: {description: Gate control input.}
+      D: {description: Drain terminal.}
+      S: {description: Source terminal.}
 - id: BASIC_GROUND
   name: Ground
   category: Basic

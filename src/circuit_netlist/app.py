@@ -13,7 +13,7 @@ from .component_library import ComponentLibrary, load_component_library
 from .erc import ElectricalRuleChecker
 from .exporters import export_png_bytes_from_scene, export_png_from_scene, export_svg
 from .hit_testing import hit_test_all
-from .models import Circuit, Diagnostic, Layout, RenderedCircuit, Severity
+from .models import Circuit, Diagnostic, Layout, NetRouteStyle, RenderedCircuit, Severity
 from .parser import NetlistParser
 from .placement import DeterministicPlacementEngine
 from .regression import compare_diagnostic_codes, detect_patterns, engineering_calculations, visual_drc, visual_drc_from_scene
@@ -57,6 +57,12 @@ class HitTestRequest(BaseModel):
     x: float
     y: float
     tolerance: float = 6
+
+
+class NetRouteStyleRequest(BaseModel):
+    net_name: str
+    route_style: NetRouteStyle = NetRouteStyle.AUTO
+    layout: Layout | None = None
 
 
 class CurrentCircuitState(BaseModel):
@@ -320,31 +326,161 @@ def render_error_svg(diagnostics: list[Diagnostic]) -> str:
 
 
 def current_scene_payload() -> dict[str, Any]:
-    lib = library()
-    parser = NetlistParser()
-    source_text = CURRENT_STATE.source_text or (EXAMPLE_NETLIST.read_text(encoding="utf-8") if EXAMPLE_NETLIST.exists() else "")
-    source_filename = CURRENT_STATE.source_filename or str(EXAMPLE_NETLIST)
-    circuit, diagnostics = parser.parse_text(source_text, Path(source_filename))
-    if circuit is None:
-        return {"scene": None, "diagnostics": [diag.model_dump(mode="json") for diag in diagnostics]}
-    validation = CircuitValidator(lib).validate(circuit)
-    diagnostics.extend(validation)
-    if has_blocking_diagnostics(diagnostics):
-        return {"scene": None, "diagnostics": [diag.model_dump(mode="json") for diag in diagnostics]}
-    diagnostics.extend(ElectricalRuleChecker(lib).check(circuit))
-    existing_layout = parse_layout_text(CURRENT_STATE.layout_text)
-    layout = DeterministicPlacementEngine().place(circuit, lib, existing_layout)
-    routes = ManhattanRouter().route(circuit, lib, layout)
-    for route in routes:
-        for warning in route.warnings:
-            diagnostics.append(Diagnostic(severity=Severity.WARNING, message=warning))
-    scene = build_schematic_scene(circuit, lib, layout, routes)
+    context = current_render_context()
+    diagnostics = context["diagnostics"]
+    scene = context.get("scene")
+    layout = context.get("layout")
+    routes = context.get("routes", [])
     return {
-        "scene": scene.model_dump(mode="json"),
+        "scene": scene.model_dump(mode="json") if scene else None,
         "diagnostics": [diag.model_dump(mode="json") for diag in diagnostics],
-        "layout": layout.model_dump(mode="json"),
+        "layout": layout.model_dump(mode="json") if layout else {},
         "route_count": len(routes),
     }
+
+
+def current_render_context(layout_override: Layout | None = None) -> dict[str, Any]:
+    lib = library()
+    source_text = CURRENT_STATE.source_text or (EXAMPLE_NETLIST.read_text(encoding="utf-8") if EXAMPLE_NETLIST.exists() else "")
+    source_filename = CURRENT_STATE.source_filename or str(EXAMPLE_NETLIST)
+    circuit, diagnostics = NetlistParser().parse_text(source_text, Path(source_filename))
+    if circuit is None:
+        return {"library": lib, "circuit": None, "diagnostics": diagnostics, "layout": None, "routes": [], "scene": None, "analysis": None}
+    validation = CircuitValidator(lib).validate(circuit)
+    diagnostics.extend(validation)
+    existing_layout = layout_override if layout_override is not None else parse_layout_text(CURRENT_STATE.layout_text)
+    layout = DeterministicPlacementEngine().place(circuit, lib, existing_layout)
+    routes = []
+    scene = None
+    analysis = TopologyAnalyzer().analyze(circuit, lib)
+    if not has_blocking_diagnostics(diagnostics):
+        diagnostics.extend(ElectricalRuleChecker(lib).check(circuit))
+        routes = ManhattanRouter().route(circuit, lib, layout)
+        for route in routes:
+            for warning in route.warnings:
+                diagnostics.append(Diagnostic(severity=Severity.WARNING, code="ROUTING_WARNING", message=warning, net_name=route.name))
+        scene = build_schematic_scene(circuit, lib, layout, routes)
+        drc_findings, _ = visual_drc_from_scene(scene)
+        diagnostics.extend(drc_findings)
+    return {"library": lib, "circuit": circuit, "diagnostics": diagnostics, "layout": layout, "routes": routes, "scene": scene, "analysis": analysis}
+
+
+def component_detail_payload(ref: str, context: dict[str, Any]) -> dict[str, Any]:
+    circuit: Circuit | None = context.get("circuit")
+    lib: ComponentLibrary = context["library"]
+    layout: Layout | None = context.get("layout")
+    analysis = context.get("analysis")
+    if circuit is None:
+        raise HTTPException(status_code=404, detail="No circuit is loaded")
+    component = next((item for item in circuit.components if item.ref == ref), None)
+    if component is None:
+        raise HTTPException(status_code=404, detail="Component not found")
+    definition = lib.get(component.component_id)
+    pin_nets = connected_pin_nets(circuit)
+    placement = layout.components.get(ref) if layout else None
+    metadata = dict(definition.metadata) if definition else {}
+    pin_metadata = metadata.get("pins", {}) if isinstance(metadata.get("pins", {}), dict) else {}
+    pins = []
+    if definition:
+        for pin in definition.pins:
+            info = pin_metadata.get(pin.name) or pin_metadata.get(pin.number) or {}
+            pins.append(
+                {
+                    "number": pin.number,
+                    "name": pin.name,
+                    "electrical_type": pin.electrical_type.value,
+                    "connected_net": pin_nets.get((ref, pin.name)) or pin_nets.get((ref, pin.number)),
+                    "description": info.get("description", ""),
+                    "expected_connection": info.get("expected_connection", ""),
+                }
+            )
+    patterns = []
+    if analysis:
+        for pattern in analysis.patterns:
+            if ref in pattern.component_refs:
+                patterns.append({"type": pattern.pattern_type.value, "confidence": pattern.confidence, "metadata": pattern.metadata})
+    return {
+        "ref": ref,
+        "component_id": component.component_id,
+        "name": definition.name if definition else component.component_id,
+        "category": definition.category if definition else "",
+        "package": definition.package if definition else "",
+        "parameters": {name: getattr(value, "original", value) for name, value in component.parameters.items()},
+        "value": getattr(component.parameters.get("value"), "original", None),
+        "role": getattr(component.parameters.get("role"), "original", component.parameters.get("role")),
+        "orientation": placement.rotation if placement else None,
+        "verified_status": metadata.get("verified_status", "unknown" if not definition else "unspecified"),
+        "summary": metadata.get("summary") or (definition.description if definition else "Unknown component definition."),
+        "function": metadata.get("function", ""),
+        "common_use": metadata.get("common_use", ""),
+        "notes": metadata.get("notes", ""),
+        "warnings": metadata.get("warnings", ""),
+        "datasheet_url": metadata.get("datasheet_url", ""),
+        "pins": pins,
+        "topology_role": analysis.component_roles.get(ref).value if analysis and ref in analysis.component_roles else None,
+        "topology_patterns": patterns,
+        "generic": bool(metadata.get("generic_symbol") or metadata.get("functional_symbol") or metadata.get("incomplete_pinout")),
+    }
+
+
+def net_detail_payload(net_name: str, context: dict[str, Any]) -> dict[str, Any]:
+    circuit: Circuit | None = context.get("circuit")
+    layout: Layout | None = context.get("layout")
+    routes: list[Any] = context.get("routes", [])
+    if circuit is None:
+        raise HTTPException(status_code=404, detail="No circuit is loaded")
+    net = next((item for item in circuit.nets if item.name == net_name), None)
+    if net is None:
+        raise HTTPException(status_code=404, detail="Net not found")
+    route = next((item for item in routes if item.name == net_name), None)
+    manual = (layout.nets.get(net_name, {}) if layout else {}).get("route_style")
+    route_meta = route.metadata.get("route_style", {}) if route else {}
+    return {
+        "net_name": net_name,
+        "endpoint_count": len(net.pins),
+        "manual_override": manual,
+        "resolved_route_style": route_meta.get("selected_style") or _route_style_from_render_style(route.render_style if route else ""),
+        "render_style": route.render_style if route else "",
+        "auto_reason": route_meta.get("reason", ""),
+        "route_style_debug": route_meta,
+        "available_route_styles": [style.value for style in NetRouteStyle],
+        "endpoints": route.endpoints if route else [],
+    }
+
+
+def connected_pin_nets(circuit: Circuit) -> dict[tuple[str, str], str]:
+    result: dict[tuple[str, str], str] = {}
+    for net in circuit.nets:
+        for pin in net.pins:
+            result[(pin.component_ref, pin.pin_name)] = net.name
+            if pin.resolved_name:
+                result[(pin.component_ref, pin.resolved_name)] = net.name
+            if pin.resolved_number:
+                result[(pin.component_ref, pin.resolved_number)] = net.name
+    return result
+
+
+def apply_net_route_style(layout: Layout, net_name: str, route_style: NetRouteStyle) -> Layout:
+    data = layout.nets.setdefault(net_name, {})
+    if route_style == NetRouteStyle.AUTO:
+        data.pop("route_style", None)
+        data.pop("render_style", None)
+        if not data:
+            layout.nets.pop(net_name, None)
+    else:
+        data["route_style"] = route_style.value
+        data.pop("render_style", None)
+    return layout
+
+
+def _route_style_from_render_style(render_style: str) -> str:
+    if render_style == "power_symbol":
+        return NetRouteStyle.POWER_SYMBOL.value
+    if render_style == "net_label":
+        return NetRouteStyle.LABEL.value
+    if render_style == "local_wire":
+        return NetRouteStyle.DIRECT.value
+    return NetRouteStyle.AUTO.value
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -492,6 +628,16 @@ def current_scene() -> dict[str, Any]:
     return current_scene_payload()
 
 
+@app.get("/api/circuit/component-details/{ref}")
+def current_component_details(ref: str) -> dict[str, Any]:
+    return component_detail_payload(ref, current_render_context())
+
+
+@app.get("/api/circuit/net-details/{net_name}")
+def current_net_details(net_name: str) -> dict[str, Any]:
+    return net_detail_payload(net_name, current_render_context())
+
+
 @app.post("/api/circuit/scene/hit-test")
 def current_scene_hit_test(request: HitTestRequest) -> dict[str, Any]:
     payload = current_scene_payload()
@@ -565,6 +711,18 @@ def autoroute(request: LayoutSaveRequest | None = None) -> dict[str, object]:
         "circuit": rendered.circuit.model_dump(mode="json") if rendered.circuit else None,
     }
     return {"layout": schematic["layout"], "scene": scene_payload, "svg": svg, "diagnostics": [d.model_dump() for d in rendered.diagnostics], "schematic": schematic, "current": CURRENT_STATE.model_dump(mode="json")}
+
+
+@app.post("/api/layout/net-route-style")
+def set_net_route_style(request: NetRouteStyleRequest) -> dict[str, object]:
+    layout = request.layout or parse_layout_text(CURRENT_STATE.layout_text)
+    if layout is None:
+        context = current_render_context()
+        layout = context.get("layout") or Layout()
+    apply_net_route_style(layout, request.net_name, request.route_style)
+    CURRENT_STATE.layout_text = layout.model_dump_json(indent=2)
+    CURRENT_STATE.layout_dirty = True
+    return autoroute(LayoutSaveRequest(layout=layout))
 
 
 @app.get("/api/export/svg")

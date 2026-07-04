@@ -205,3 +205,29 @@ Still intentionally limited to QA-1 scope:
 - Embedded unit-test snippets remain pytest-owned synthetic circuits unless promoted into physical `.cnet` fixtures and manifests.
 - Deferred: Playwright execution and expansion.
 - Deferred: simulation engine.
+
+## Milestone QA-2 - component info, net route-style control, and visible-geometry DRC
+
+Status: complete
+
+Implemented in this branch:
+
+- Library-driven component information metadata for common components, including 555 timer, ATtiny402, charger block, solar panel, battery, resistor, capacitor, LED, MOSFET, op amp, diode, inductor, and DC source.
+- Component details API and properties-panel rendering with brief summary, function, status, topology patterns, and connected pin-net table.
+- Explicit `NetRouteStyle` model with `auto`, `direct`, `label`, and `power_symbol`.
+- Manual route-style overrides saved in layout JSON and exposed through the net properties panel.
+- AUTO route-style heuristic with global rail detection, close-net direct routing, label preference for distant/fanout/sense nets, and deterministic direct-candidate obstacle status.
+- Route-style debug metadata for selected style, reason, endpoint count, estimated direct length/bends, and direct/label status.
+- Stricter visible-geometry DRC for label text, label endpoint flags, stubs, power/ground symbols, power labels, component text, component symbols, and precise ownership exemptions.
+- Exact label endpoint collision bounds that match the drawn flag instead of a broad text-plus-padding rectangle.
+- Generated label/symbol/stub reservations in placement context so later attachments avoid existing visible geometry.
+- Solar visible-overlap audit and fixes for LED_ENABLE/VBAT symbol conflicts and transient VBAT/CHG1 symbol-clearance conflicts.
+- Python tests for route-style overrides, API persistence, component metadata/detail payloads, frontend source contracts, visible-geometry DRC diagnostics, ownership exemptions, and solar zero-overlap regression.
+- Documentation in `docs/component_information_panel.md`, `docs/net_route_style_policy.md`, `docs/visible_geometry_drc.md`, and `docs/solar_visible_overlap_audit.md`.
+
+Still intentionally limited to QA-2 scope:
+
+- No simulation engine, DC solver, SPICE export, solar/weather simulation, or battery simulation.
+- No Playwright execution or browser-test expansion.
+- No major router replacement or placement architecture rewrite.
+- Direct-vs-label AUTO validation uses deterministic component-obstacle estimates; full scene candidate comparison for every route style remains future work.

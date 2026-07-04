@@ -656,7 +656,7 @@ def label_elements(ref: str, definition: ComponentDefinition, placement: Placeme
 def component_label_positions(definition: ComponentDefinition, placement: Placement) -> tuple[int, int, str, int, int, str]:
     width, height = component_size(definition, placement)
     if definition.body.renderer in {"nmos", "pmos"}:
-        return -12, 14, "end", -12, height + 18, "end"
+        return -48, -8, "end", -48, -30, "end"
     anchors = [local_pin_anchor(definition, pin, placement) for pin in definition.pins]
     uses_top_bottom_pins = bool(anchors) and all(y in {0, height} for _, y in anchors)
     if uses_top_bottom_pins:

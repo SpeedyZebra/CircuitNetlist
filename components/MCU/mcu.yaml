@@ -15,7 +15,21 @@
     - {number: "6", name: PA2, aliases: [AIN2], side: right, position: 3, electrical_type: bidirectional}
     - {number: "7", name: PA3, aliases: [AIN3], side: right, position: 2, electrical_type: bidirectional}
     - {number: "8", name: PA0_UPDI, aliases: [PA0, UPDI], side: right, position: 1, electrical_type: bidirectional}
-  metadata: {datasheet_url: "", notes: ""}
+  metadata:
+    verified_status: verified_pinout
+    summary: Small 8-bit tinyAVR microcontroller. VDD and GND power the device; PA pins are GPIO.
+    function: Provides digital control, ADC-capable pins, and UPDI programming on PA0_UPDI.
+    datasheet_url: ""
+    notes: PA0_UPDI is also used for UPDI programming.
+    pins:
+      VDD: {description: Positive device supply.}
+      GND: {description: Ground reference.}
+      PA6: {description: General-purpose I/O, also analog input AIN6.}
+      PA7: {description: General-purpose I/O, also analog input AIN7.}
+      PA1: {description: General-purpose I/O, also analog input AIN1.}
+      PA2: {description: General-purpose I/O, also analog input AIN2.}
+      PA3: {description: General-purpose I/O, also analog input AIN3.}
+      PA0_UPDI: {description: General-purpose I/O and UPDI programming/debug pin.}
 - id: MCU_ATtiny404_SOIC14
   name: ATtiny404
   category: MCU
@@ -27,4 +41,8 @@
   pins:
     - {number: "1", name: PIN1_PLACEHOLDER, aliases: [], side: left, position: 1, electrical_type: bidirectional, required: false}
     - {number: "14", name: PIN14_PLACEHOLDER, aliases: [], side: right, position: 1, electrical_type: bidirectional, required: false}
-  metadata: {incomplete_pinout: true, notes: "Do not use for production schematics until real pinout is added."}
+  metadata:
+    verified_status: placeholder
+    incomplete_pinout: true
+    summary: Placeholder ATtiny404 package symbol with incomplete pinout.
+    notes: Do not use for production schematics until real pinout is added.

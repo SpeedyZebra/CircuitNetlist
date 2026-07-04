@@ -7,7 +7,14 @@
   pins:
     - {number: "1", name: POS, aliases: [PLUS, +, VOUT], side: top, position: 1, electrical_type: power_out}
     - {number: "2", name: NEG, aliases: [MINUS, -, GND], side: bottom, position: 1, electrical_type: passive}
-  metadata: {functional_symbol: true, source_type: dc_voltage}
+  metadata:
+    verified_status: generic
+    functional_symbol: true
+    source_type: dc_voltage
+    summary: Idealized DC voltage source for schematic-level examples.
+    pins:
+      POS: {description: Positive output terminal.}
+      NEG: {description: Negative or return terminal.}
 - id: POWER_SOLAR_PANEL_GENERIC
   name: Generic Solar Panel
   category: Power_Supply
@@ -16,7 +23,15 @@
   pins:
     - {number: "1", name: POS, aliases: [PLUS, +], side: right, position: 1, electrical_type: power_out}
     - {number: "2", name: NEG, aliases: [MINUS, -], side: right, position: 2, electrical_type: passive}
-  metadata: {rated_voltage_v: null, rated_current_a: null, rated_wattage_w: null}
+  metadata:
+    verified_status: generic
+    rated_voltage_v: null
+    rated_current_a: null
+    rated_wattage_w: null
+    summary: Generic photovoltaic source. POS supplies panel voltage relative to NEG.
+    pins: &solarpins
+      POS: {description: Positive solar-panel terminal.}
+      NEG: {description: Negative solar-panel terminal.}
 - id: POWER_SOLAR_PANEL_5V_2W
   name: 5V 2W Solar Panel
   category: Power_Supply
@@ -24,7 +39,15 @@
   pins:
     - {number: "1", name: POS, aliases: [PLUS, +], side: right, position: 1, electrical_type: power_out}
     - {number: "2", name: NEG, aliases: [MINUS, -], side: right, position: 2, electrical_type: passive}
-  metadata: {rated_voltage_v: 5.0, rated_current_a: 0.4, rated_wattage_w: 2.0, open_circuit_voltage_v: null, short_circuit_current_a: null}
+  metadata:
+    verified_status: generic
+    rated_voltage_v: 5.0
+    rated_current_a: 0.4
+    rated_wattage_w: 2.0
+    open_circuit_voltage_v: null
+    short_circuit_current_a: null
+    summary: Small 5 V photovoltaic panel model for charger examples.
+    pins: *solarpins
 - id: POWER_SOLAR_PANEL_5V_6W
   name: 5V 6W Solar Panel
   category: Power_Supply
@@ -32,7 +55,13 @@
   pins:
     - {number: "1", name: POS, aliases: [PLUS, +], side: right, position: 1, electrical_type: power_out}
     - {number: "2", name: NEG, aliases: [MINUS, -], side: right, position: 2, electrical_type: passive}
-  metadata: {rated_voltage_v: 5.0, rated_current_a: 1.2, rated_wattage_w: 6.0}
+  metadata:
+    verified_status: generic
+    rated_voltage_v: 5.0
+    rated_current_a: 1.2
+    rated_wattage_w: 6.0
+    summary: Larger 5 V photovoltaic panel model.
+    pins: *solarpins
 - id: POWER_LIPO_1S
   name: 1S LiPo Battery
   category: Power_Supply
@@ -41,7 +70,16 @@
   pins:
     - {number: "1", name: POS, aliases: [PLUS, +], side: right, position: 1, electrical_type: power_out}
     - {number: "2", name: NEG, aliases: [MINUS, -], side: right, position: 2, electrical_type: passive}
-  metadata: {nominal_voltage_v: 3.7, max_charged_voltage_v: 4.2, min_recommended_voltage_v: 3.0}
+  metadata:
+    verified_status: generic
+    nominal_voltage_v: 3.7
+    max_charged_voltage_v: 4.2
+    min_recommended_voltage_v: 3.0
+    summary: Single-cell LiPo battery model.
+    warnings: Real LiPo cells require appropriate charging, protection, and safe operating limits.
+    pins: &batterypins
+      POS: {description: Positive battery terminal.}
+      NEG: {description: Negative battery terminal.}
 - id: POWER_LIION_1S
   name: 1S Li-ion Battery
   category: Power_Supply
@@ -50,7 +88,14 @@
   pins:
     - {number: "1", name: POS, aliases: [PLUS, +], side: right, position: 1, electrical_type: power_out}
     - {number: "2", name: NEG, aliases: [MINUS, -], side: right, position: 2, electrical_type: passive}
-  metadata: {nominal_voltage_v: 3.6, max_charged_voltage_v: 4.2, min_recommended_voltage_v: 2.8}
+  metadata:
+    verified_status: generic
+    nominal_voltage_v: 3.6
+    max_charged_voltage_v: 4.2
+    min_recommended_voltage_v: 2.8
+    summary: Single-cell Li-ion battery model.
+    warnings: Real Li-ion cells require appropriate charging and protection circuitry.
+    pins: *batterypins
 - id: POWER_CHARGER_BQ25185_BLOCK
   name: BQ25185 Charger
   category: Power_Supply
@@ -66,4 +111,17 @@
     - {number: "5", name: TS, aliases: [], side: left, position: 3, electrical_type: input, required: false}
     - {number: "6", name: STAT, aliases: [], side: right, position: 4, electrical_type: open_drain, required: false}
     - {number: "7", name: CE, aliases: [], side: left, position: 4, electrical_type: input, required: false}
-  metadata: {functional_symbol: true}
+  metadata:
+    verified_status: functional_block
+    functional_symbol: true
+    summary: Functional BQ25185-style single-cell battery charger block.
+    function: Accepts input power, charges the battery node, and provides a system output rail.
+    warnings: This is a schematic functional block, not a physical IC pinout.
+    pins:
+      VIN: {description: Charger input power.}
+      GND: {description: Charger ground reference.}
+      BAT: {description: Battery connection.}
+      SYS: {description: System output rail.}
+      TS: {description: Battery temperature sense input.}
+      STAT: {description: Open-drain charge status output.}
+      CE: {description: Charger enable input.}

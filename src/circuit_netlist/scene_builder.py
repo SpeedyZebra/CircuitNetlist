@@ -12,6 +12,7 @@ from .schematic_geometry import (
     choose_ground_symbol_attachment,
     choose_net_label_position,
     choose_power_symbol_attachment,
+    label_flag_box,
     component_label_positions,
     label_flag_path,
     pin_label_position,
@@ -91,11 +92,12 @@ def _route_elements(route: RoutedNet, route_index: int, context: Any) -> list[Sc
             y = int(endpoint["y"])
             side = str(endpoint.get("side", "right"))
             segments, stub_x, stub_y, anchor, text_x, text_y, render_side = choose_net_label_position(route.name, x, y, side, context)
+            flag_bounds = Bounds.from_tuple(label_flag_box(stub_x, stub_y, render_side))
             for segment in segments:
                 context.reserve_stub(segment)
             context.reserve_text(route.name, text_x, text_y, anchor)
+            context.reserve_label_shape(flag_bounds.as_tuple())
             endpoint_id = f"net-label-{safe_id(route.name)}-{index}"
-            flag_bounds = Bounds(min_x=min(stub_x, text_x) - 72, min_y=min(stub_y, text_y) - 24, max_x=max(stub_x, text_x) + 72, max_y=max(stub_y, text_y) + 24)
             elements.append(
                 SceneElement(
                     id=endpoint_id,
@@ -106,7 +108,7 @@ def _route_elements(route: RoutedNet, route_index: int, context: Any) -> list[Sc
                     net_name=route.name,
                     bounds=flag_bounds,
                     collision_bounds=flag_bounds,
-                    hit_bounds=flag_bounds.expanded(4),
+                    hit_bounds=flag_bounds.expanded(12),
                     primitives=[RenderPrimitive(kind="path", style_class="label-flag", geometry={"d": label_flag_path(stub_x, stub_y, render_side)})],
                     selectable=True,
                     z_index=route_index * 100 + 18 + index,
@@ -190,6 +192,7 @@ def _route_elements(route: RoutedNet, route_index: int, context: Any) -> list[Sc
                     )
                 )
             symbol_bounds = power_symbol_box(symbol_x, symbol_y, route.name, "ground" if is_ground else "power")
+            context.reserve_symbol(symbol_bounds)
             elements.append(
                 SceneElement(
                     id=f"{endpoint_id}:symbol",
@@ -270,7 +273,7 @@ def _route_elements(route: RoutedNet, route_index: int, context: Any) -> list[Sc
             hit_bounds=route_bounds.expanded(8),
             selectable=True,
             z_index=route_index * 100,
-            metadata={"render_style": route.render_style},
+            metadata={"render_style": route.render_style, "route_style": route.metadata.get("route_style", {})},
         ),
         *elements,
     ]

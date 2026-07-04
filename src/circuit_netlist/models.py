@@ -28,6 +28,13 @@ class Severity(str, Enum):
     FATAL = "FATAL"
 
 
+class NetRouteStyle(str, Enum):
+    AUTO = "auto"
+    DIRECT = "direct"
+    LABEL = "label"
+    POWER_SYMBOL = "power_symbol"
+
+
 class Diagnostic(BaseModel):
     severity: Severity
     message: str
@@ -159,6 +166,7 @@ class RoutedNet(BaseModel):
     endpoints: list[dict[str, Any]] = Field(default_factory=list)
     junctions: list[tuple[int, int]] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class RenderedCircuit(BaseModel):

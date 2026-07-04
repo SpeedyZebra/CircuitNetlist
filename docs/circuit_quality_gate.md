@@ -1,6 +1,6 @@
 # Circuit Quality Gate
 
-QA-1 adds a project-wide circuit quality gate for every physical `.cnet` file in the repository.
+QA-1 added a project-wide circuit quality gate for every physical `.cnet` file in the repository. QA-2 extends that gate with stricter visible-geometry checks for label, stub, text, and symbol overlaps.
 
 ## Clean Versus Negative
 
@@ -139,6 +139,7 @@ The gate fails on:
 - validation warnings/errors for clean circuits
 - ERC warnings/errors for clean circuits
 - visual DRC warnings/errors for clean circuits
+- visible label/stub/symbol/text overlap diagnostics
 - route warnings
 - placement hard violations
 - empty scenes
