@@ -1,8 +1,8 @@
 # Circuit Inventory
 
-QA-1 inventory date: 2026-07-03
+QA-1 inventory date: 2026-07-03. QA-3 clarifies that "all circuits" means all physical fixture `.cnet` files; embedded unit-test snippets are tracked separately below.
 
-All physical `.cnet` files are classified in `test_circuits/clean_circuits.yaml` or `test_circuits/negative_circuits.yaml`. Clean circuits are expected to produce zero diagnostics across parse, validation, ERC, placement, routing, scene, visual DRC, SVG export, and PNG export. Negative circuits are fault fixtures and must produce exactly the listed diagnostic codes.
+All physical `.cnet` files are classified in `test_circuits/clean_circuits.yaml` or `test_circuits/negative_circuits.yaml`. Clean circuits are expected to produce zero diagnostics across parse, validation, ERC, placement, routing, scene, shared visual DRC, SVG export, and PNG export. Negative circuits are fault fixtures and must produce exactly the listed diagnostic codes.
 
 ## Physical Circuit Files
 
@@ -36,7 +36,7 @@ All physical `.cnet` files are classified in `test_circuits/clean_circuits.yaml`
 
 ## Embedded Test Netlists
 
-Embedded snippets are not user-facing project fixtures. They are classified here so they are not unknown, but they remain local unit-test data unless promoted to `.cnet` files and manifests.
+Embedded snippets are not user-facing project fixtures. They are inventoried separately here so they are not unknown, but they remain local unit-test data unless promoted to physical `.cnet` files and manifests.
 
 | Source | Class | Purpose / family | Manifest | Pytest | Audit CLI |
 | --- | --- | --- | --- | --- | --- |

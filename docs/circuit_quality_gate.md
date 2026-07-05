@@ -1,6 +1,6 @@
 # Circuit Quality Gate
 
-QA-1 added a project-wide circuit quality gate for every physical `.cnet` file in the repository. QA-2 extends that gate with stricter visible-geometry checks for label, stub, text, and symbol overlaps.
+QA-1 added a project-wide circuit quality gate for every physical `.cnet` file in the repository. QA-2 extends that gate with stricter visible-geometry checks for label, stub, text, and symbol overlaps. QA-3 centralizes those checks in `src/circuit_netlist/visual_drc.py` so regression, audit, app rendering, and placement candidate validation use the same visual DRC implementation.
 
 ## Clean Versus Negative
 
@@ -44,6 +44,10 @@ Each entry records:
 
 Clean manifest entries inherit `diagnostics: []`.
 
+Physical fixture circuits are first-class `.cnet` files under `examples/`, `test_circuits/`, or related fixture directories. These are fully inventoried and included in clean/negative manifests.
+
+Embedded test netlists are inline snippets used by unit tests to exercise targeted behavior. They are documented separately in `docs/circuit_inventory.md` and are not counted as user-facing fixture circuits unless promoted to physical `.cnet` files.
+
 ## Full Pipeline
 
 The audit runner executes:
@@ -54,7 +58,7 @@ The audit runner executes:
 4. Deterministic placement
 5. Manhattan routing
 6. Canonical scene build
-7. Visual DRC
+7. Shared visual DRC from `src/circuit_netlist/visual_drc.py`
 8. ERC plus regression ERC checks
 9. SVG export
 10. PNG export when Pillow is available
@@ -112,7 +116,7 @@ Diagnostic normalization lives in `src/circuit_netlist/diagnostics.py`. It recor
 - source
 - subsystem
 
-Regression, audit, and route-validated placement code use the shared code-count comparison helper so diagnostic namespaces are not silently ignored.
+Regression, audit, route-validated placement, and app/API rendering use the shared visual DRC module. Regression and audit comparison use the shared code-count comparison helpers so diagnostic namespaces are not silently ignored.
 
 ## Adding A Clean Circuit
 
@@ -152,6 +156,6 @@ The gate fails on:
 
 ## Deferred Work
 
-Playwright execution remains deferred and is not required for QA-1.
+Playwright execution remains deferred and is not required for QA-3.
 
-Simulation remains deferred. QA-1 does not add a DC solver, SPICE export, solar/weather simulation, or battery simulation.
+Simulation remains deferred. QA-3 does not add a DC solver, SPICE export, solar/weather simulation, or battery simulation.

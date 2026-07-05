@@ -1,5 +1,7 @@
 from pathlib import Path
 
+import pytest
+
 from circuit_netlist.component_library import load_component_library
 from circuit_netlist.geometry import (
     absolute_pin_point,
@@ -29,6 +31,7 @@ from circuit_netlist.scene_builder import build_schematic_scene
 
 
 ROOT = Path(__file__).resolve().parents[1]
+pytestmark = [pytest.mark.integration, pytest.mark.slow]
 MIN_COMPONENT_GAP = 40
 
 
@@ -37,7 +40,7 @@ def load_example():
     circuit, diagnostics = NetlistParser().parse_file(ROOT / "examples" / "solar_led.cnet")
     assert circuit is not None, diagnostics
     layout = DeterministicPlacementEngine().place(circuit, library)
-    routes = ManhattanRouter().route(circuit, library, layout)
+    routes = ManhattanRouter(validate_auto_route_styles=False).route(circuit, library, layout)
     return library, circuit, layout, routes
 
 

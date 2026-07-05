@@ -35,6 +35,12 @@ class NetRouteStyle(str, Enum):
     POWER_SYMBOL = "power_symbol"
 
 
+class RenderQualityMode(str, Enum):
+    INTERACTIVE = "interactive"
+    STRICT = "strict"
+    AUDIT = "audit"
+
+
 class Diagnostic(BaseModel):
     severity: Severity
     message: str

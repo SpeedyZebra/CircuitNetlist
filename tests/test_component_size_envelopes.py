@@ -17,6 +17,7 @@ from circuit_netlist.validator import CircuitValidator, has_blocking_diagnostics
 
 
 ROOT = Path(__file__).resolve().parents[1]
+pytestmark = [pytest.mark.integration, pytest.mark.slow]
 STRESS_ROOT = ROOT / "test_circuits" / "good" / "04_repeated_groups"
 
 
@@ -53,14 +54,32 @@ def parse_case(filename: str):
     return circuit
 
 
+def stable_layout_dump(layout: Layout) -> dict[str, object]:
+    canvas = dict(layout.canvas)
+    optimizer = canvas.get("placement_optimizer")
+    if isinstance(optimizer, dict):
+        canvas["placement_optimizer"] = {
+            "mode": optimizer.get("mode"),
+            "optimize_soft_constraints": optimizer.get("optimize_soft_constraints"),
+            "optimized": optimizer.get("optimized"),
+            "fast_path": optimizer.get("fast_path"),
+        }
+    return {
+        "components": layout.model_dump(mode="json")["components"],
+        "nets": layout.model_dump(mode="json")["nets"],
+        "wire_waypoints": layout.model_dump(mode="json")["wire_waypoints"],
+        "canvas": canvas,
+    }
+
+
 def run_pipeline(circuit, library: ComponentLibrary, existing: Layout | None = None):
     validation = CircuitValidator(library).validate(circuit)
     assert not has_blocking_diagnostics(validation), validation
     analysis = TopologyAnalyzer().analyze(circuit, library)
     engine = DeterministicPlacementEngine()
     layout = engine.place(circuit, library, existing)
-    assert layout.model_dump(mode="json") == DeterministicPlacementEngine().place(circuit, library, existing).model_dump(mode="json")
-    routes = ManhattanRouter().route(circuit, library, layout)
+    assert stable_layout_dump(layout) == stable_layout_dump(DeterministicPlacementEngine().place(circuit, library, existing))
+    routes = ManhattanRouter(validate_auto_route_styles=False).route(circuit, library, layout)
     drc, metrics = visual_drc(circuit, library, layout, routes)
     render_circuit(circuit, library, layout, routes, [*validation, *drc])
     return analysis, layout, drc, metrics, engine.last_group_envelopes

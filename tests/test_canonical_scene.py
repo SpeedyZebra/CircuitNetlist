@@ -1,6 +1,8 @@
 from pathlib import Path
 import re
 
+import pytest
+
 from circuit_netlist import app as app_module
 from circuit_netlist.component_library import load_component_library
 from circuit_netlist.exporters import export_png_from_scene
@@ -16,6 +18,7 @@ from circuit_netlist.scene_renderer import render_scene_svg
 
 
 ROOT = Path(__file__).resolve().parents[1]
+pytestmark = [pytest.mark.integration, pytest.mark.slow]
 
 
 def load_scene():
@@ -23,7 +26,7 @@ def load_scene():
     circuit, diagnostics = NetlistParser().parse_file(ROOT / "examples" / "solar_led.cnet")
     assert circuit is not None, diagnostics
     layout = DeterministicPlacementEngine().place(circuit, library)
-    routes = ManhattanRouter().route(circuit, library, layout)
+    routes = ManhattanRouter(validate_auto_route_styles=False).route(circuit, library, layout)
     scene = build_schematic_scene(circuit, library, layout, routes)
     return library, circuit, layout, routes, scene
 

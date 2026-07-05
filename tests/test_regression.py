@@ -1,5 +1,6 @@
 from pathlib import Path
 
+import pytest
 import yaml
 
 from circuit_netlist.regression import RegressionRunner, compare_diagnostic_codes, engineering_calculations, main
@@ -68,12 +69,16 @@ def test_diagnostic_code_compare_does_not_silently_exclude_namespaces() -> None:
     assert matched is False
 
 
+@pytest.mark.integration
+@pytest.mark.slow
 def test_regression_runner_all_cases_passes_and_writes_report() -> None:
     assert main(["--all"]) == 0
     assert (ROOT / "test_circuits" / "generated" / "report" / "index.html").exists()
     assert (ROOT / "test_circuits" / "generated" / "json" / "01_led_resistor_good.json").exists()
 
 
+@pytest.mark.integration
+@pytest.mark.slow
 def test_good_cases_parse_and_have_no_expected_fault_codes() -> None:
     results = RegressionRunner().run(type("Args", (), {"good_only": True, "faults_only": False, "case": None})())
     assert results
@@ -85,6 +90,8 @@ def test_good_cases_parse_and_have_no_expected_fault_codes() -> None:
         assert not [code for code in result.actual_codes if code.startswith("ERC_")]
 
 
+@pytest.mark.integration
+@pytest.mark.slow
 def test_required_faults_trigger_expected_codes() -> None:
     results = RegressionRunner().run(type("Args", (), {"good_only": False, "faults_only": True, "case": None})())
     assert results

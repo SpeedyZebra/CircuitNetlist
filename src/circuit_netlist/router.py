@@ -3,15 +3,17 @@ from __future__ import annotations
 from collections import Counter
 from dataclasses import dataclass
 from heapq import heappop, heappush
-from typing import Protocol
+from typing import Any, Protocol
 
 from .component_library import ComponentLibrary
 from .geometry import absolute_pin_point, component_body_box, component_size, visual_pin_side
-from .models import Circuit, ComponentDefinition, Layout, NetRouteStyle, Placement, RoutedNet
+from .models import Circuit, ComponentDefinition, Diagnostic, Layout, NetRouteStyle, Placement, RenderQualityMode, RoutedNet
+from .scene_builder import build_schematic_scene
+from .visual_drc import visual_drc_from_scene
 
 GridEdge = tuple[tuple[int, int], tuple[int, int]]
 POWER_NET_NAMES = {"GND", "AGND", "DGND", "PGND", "VCC", "VDD", "VSS", "VEE", "VBAT", "3V3", "5V", "12V", "-12V", "+12V", "+5V", "+3V3", "V+", "V-"}
-LABEL_PREFERRED_NETS = {"SUN_SENSE", "BAT_SENSE", "LED_ENABLE", "LED_ANODE", "LED_SWITCH", "PANEL_POS"}
+CONTROL_SIGNAL_TOKENS = ("SENSE", "CTRL", "CONTROL", "ENABLE", "EN", "GATE", "ADC", "FB", "TRIG", "THRESH", "RESET")
 
 
 class RoutingEngine(Protocol):
@@ -20,12 +22,84 @@ class RoutingEngine(Protocol):
 
 
 @dataclass
+class NetRouteStyleCandidate:
+    net_name: str
+    style: NetRouteStyle
+    routing_succeeded: bool
+    visual_diagnostics: list[Diagnostic]
+    new_visual_diagnostics: list[Diagnostic]
+    estimated_length: float
+    actual_length: float | None
+    bend_count: int | None
+    label_count: int
+    symbol_count: int
+    readability_score: float
+    rejection_reasons: list[str]
+    selected: bool = False
+
+    def as_metadata(self) -> dict[str, Any]:
+        return {
+            "style": self.style.value,
+            "routing_succeeded": self.routing_succeeded,
+            "visual_diagnostic_codes": sorted(diag.code for diag in self.visual_diagnostics if diag.code),
+            "new_visual_diagnostic_codes": sorted(diag.code for diag in self.new_visual_diagnostics if diag.code),
+            "estimated_length": self.estimated_length,
+            "actual_length": self.actual_length,
+            "bend_count": self.bend_count,
+            "label_count": self.label_count,
+            "symbol_count": self.symbol_count,
+            "readability_score": self.readability_score,
+            "rejection_reasons": list(self.rejection_reasons),
+            "selected": self.selected,
+        }
+
+
+@dataclass
 class ManhattanRouter:
     grid: int = 20
     obstacle_padding: int = 24
     overlap_penalty: int = 1_000_000
+    validate_auto_route_styles: bool = True
+    max_auto_validated_nets: int = 2
+
+    @classmethod
+    def for_quality(cls, quality_mode: RenderQualityMode | str) -> "ManhattanRouter":
+        mode = RenderQualityMode(quality_mode)
+        if mode == RenderQualityMode.INTERACTIVE:
+            return cls(validate_auto_route_styles=False, max_auto_validated_nets=0)
+        if mode == RenderQualityMode.AUDIT:
+            return cls(validate_auto_route_styles=True, max_auto_validated_nets=4)
+        return cls(validate_auto_route_styles=True, max_auto_validated_nets=2)
+
+    @classmethod
+    def for_interactive(cls) -> "ManhattanRouter":
+        return cls.for_quality(RenderQualityMode.INTERACTIVE)
+
+    @classmethod
+    def for_strict(cls) -> "ManhattanRouter":
+        return cls.for_quality(RenderQualityMode.STRICT)
+
+    @classmethod
+    def for_audit(cls) -> "ManhattanRouter":
+        return cls.for_quality(RenderQualityMode.AUDIT)
 
     def route(self, circuit: Circuit, library: ComponentLibrary, layout: Layout) -> list[RoutedNet]:
+        if self.validate_auto_route_styles:
+            initial_routes = self._route_core(circuit, library, layout)
+            selected_styles, validation_records = self._validate_auto_route_styles(circuit, library, layout, initial_routes)
+            if validation_records:
+                return self._route_core(circuit, library, layout, auto_style_overrides=selected_styles, validation_records=validation_records)
+            return initial_routes
+        return self._route_core(circuit, library, layout)
+
+    def _route_core(
+        self,
+        circuit: Circuit,
+        library: ComponentLibrary,
+        layout: Layout,
+        auto_style_overrides: dict[str, NetRouteStyle] | None = None,
+        validation_records: dict[str, dict[str, Any]] | None = None,
+    ) -> list[RoutedNet]:
         routes: list[RoutedNet] = []
         ref_to_id = {component.ref: component.component_id for component in circuit.components}
         obstacles = self._obstacles(circuit, library, layout)
@@ -58,10 +132,20 @@ class ManhattanRouter:
                         "y": pin_point[1],
                     }
                 )
-            decision = self._route_style_decision(net.name, pin_points, endpoint_refs, layout, body_obstacles_by_ref)
+            decision = self._route_style_decision(
+                net.name,
+                pin_points,
+                endpoint_refs,
+                layout,
+                body_obstacles_by_ref,
+                auto_style_overrides or {},
+                validation_records or {},
+            )
             render_style = str(decision["render_style"])
             routed.render_style = render_style
             routed.metadata["route_style"] = {key: value for key, value in decision.items() if key != "render_style"}
+            if warning := decision.get("route_style_warning"):
+                routed.warnings.append(str(warning))
             if len(pin_points) >= 2:
                 if render_style == "power_symbol":
                     # Power connectivity is represented with local symbols at each endpoint.
@@ -78,14 +162,14 @@ class ManhattanRouter:
                         routed.segments = self._simplify_segments(routed.segments)
                         routes.append(routed)
                         continue
-                if net.name in {"GND", "VBAT", "VDD", "VCC", "PANEL_POS"}:
+                if net.name in POWER_NET_NAMES:
                     self._route_rail_net(net.name, pin_points, routed, used_edges, obstacles, body_obstacles, bounds)
                     routes.append(routed)
                     continue
                 route_edges: set[GridEdge] = set()
                 escaped_points = [(pin_point, self._choose_escape_point(pin_point, side, used_edges)) for pin_point, side in pin_points]
                 route_points = [external for _, external in escaped_points]
-                root = self._rail_point(net.name, route_points) if net.name in {"GND", "VBAT", "VDD", "VCC", "PANEL_POS"} else route_points[0]
+                root = self._rail_point(net.name, route_points) if net.name in POWER_NET_NAMES else route_points[0]
                 root = self._nearest_free(root, obstacles, bounds)
                 for pin_point, external in escaped_points:
                     escape_segment = (pin_point[0], pin_point[1], external[0], external[1])
@@ -126,6 +210,8 @@ class ManhattanRouter:
         endpoint_refs: list[str],
         layout: Layout,
         body_obstacles_by_ref: dict[str, tuple[int, int, int, int]],
+        auto_style_overrides: dict[str, NetRouteStyle],
+        validation_records: dict[str, dict[str, Any]],
     ) -> dict[str, object]:
         manual = self._manual_route_style(net_name, layout)
         endpoint_count = len(pin_points)
@@ -144,12 +230,30 @@ class ManhattanRouter:
                 "label_drc_status": "manual_override",
                 "render_style": self._render_style_for_route_style(manual),
             }
+        if net_name in auto_style_overrides:
+            selected = auto_style_overrides[net_name]
+            record = dict(validation_records.get(net_name, {}))
+            record.update(
+                {
+                    "selected_style": selected.value,
+                    "manual_override": None,
+                    "endpoint_count": endpoint_count,
+                    "fanout_count": endpoint_count,
+                    "estimated_direct_length": estimated_length,
+                    "estimated_direct_bends": estimated_bends,
+                    "direct_drc_status": self._candidate_status_from_record(record, NetRouteStyle.DIRECT, direct_status),
+                    "label_drc_status": self._candidate_status_from_record(record, NetRouteStyle.LABEL, "not_considered"),
+                    "render_style": self._render_style_for_route_style(selected),
+                }
+            )
+            return record
         auto = self._auto_route_style(net_name, pin_points, direct_status)
         return {
             "selected_style": auto.value,
             "manual_override": None,
             "reason": self._auto_route_style_reason(net_name, pin_points, auto),
             "endpoint_count": endpoint_count,
+            "fanout_count": endpoint_count,
             "estimated_direct_length": estimated_length,
             "estimated_direct_bends": estimated_bends,
             "direct_drc_status": direct_status,
@@ -187,7 +291,7 @@ class ManhattanRouter:
             return NetRouteStyle.DIRECT if direct_is_clear and estimated_length <= 900 and estimated_bends <= 2 else NetRouteStyle.LABEL
         if endpoint_count == 3 and direct_is_clear and span_x <= 700 and span_y <= 520 and estimated_bends <= 4:
             return NetRouteStyle.DIRECT
-        if net_name in LABEL_PREFERRED_NETS:
+        if self._is_control_or_sense_net(net_name):
             return NetRouteStyle.LABEL
         if endpoint_count > 3:
             return NetRouteStyle.LABEL
@@ -225,11 +329,26 @@ class ManhattanRouter:
             return "simple two-endpoint net"
         if endpoint_count == 3 and style == NetRouteStyle.DIRECT:
             return "local three-endpoint net"
-        if net_name in LABEL_PREFERRED_NETS:
-            return "named sense/control net prefers labels"
+        if self._is_control_or_sense_net(net_name):
+            return "generic control or sense net prefers labels"
         if endpoint_count > 3:
             return "fanout net prefers labels"
         return "readability heuristic"
+
+    def _is_control_or_sense_net(self, net_name: str) -> bool:
+        tokens = [token for token in net_name.upper().replace("-", "_").split("_") if token]
+        return any(token in CONTROL_SIGNAL_TOKENS or token.endswith("SENSE") for token in tokens)
+
+    def _candidate_status_from_record(self, record: dict[str, Any], style: NetRouteStyle, default: str) -> str:
+        by_candidate = record.get("diagnostics_by_candidate", {})
+        candidate = by_candidate.get(style.value) if isinstance(by_candidate, dict) else None
+        if not isinstance(candidate, dict):
+            return default
+        if not candidate.get("routing_succeeded", True):
+            return "routing_failed"
+        if candidate.get("new_visual_diagnostic_codes") or candidate.get("visual_diagnostic_codes"):
+            return "scene_drc_failed"
+        return "scene_clean"
 
     def _render_style_for_route_style(self, route_style: NetRouteStyle) -> str:
         if route_style == NetRouteStyle.POWER_SYMBOL:
@@ -237,6 +356,225 @@ class ManhattanRouter:
         if route_style == NetRouteStyle.LABEL:
             return "net_label"
         return "local_wire"
+
+    def _validate_auto_route_styles(
+        self,
+        circuit: Circuit,
+        library: ComponentLibrary,
+        layout: Layout,
+        baseline_routes: list[RoutedNet],
+    ) -> tuple[dict[str, NetRouteStyle], dict[str, dict[str, Any]]]:
+        baseline_scene = build_schematic_scene(circuit, library, layout, baseline_routes)
+        baseline_diagnostics, _ = visual_drc_from_scene(baseline_scene)
+        baseline_counts = Counter(diag.code or "" for diag in baseline_diagnostics)
+        routes_by_name = {route.name: route for route in baseline_routes}
+        selected_styles: dict[str, NetRouteStyle] = {}
+        records: dict[str, dict[str, Any]] = {}
+
+        for net_name in self._candidate_validation_net_names(circuit, routes_by_name):
+            route = routes_by_name[net_name]
+            current_meta = route.metadata.get("route_style", {})
+            endpoint_count = int(current_meta.get("endpoint_count", len(route.endpoints)))
+            candidates = [
+                self._evaluate_route_style_candidate(
+                    circuit,
+                    library,
+                    layout,
+                    net_name,
+                    style,
+                    baseline_counts,
+                    route,
+                )
+                for style in self._candidate_styles_for_net(net_name, endpoint_count)
+            ]
+            selected = self._select_route_style_candidate(candidates)
+            selected.selected = True
+            selected_styles[net_name] = selected.style
+            records[net_name] = self._route_style_validation_record(net_name, route, candidates, selected)
+        return selected_styles, records
+
+    def _candidate_validation_net_names(self, circuit: Circuit, routes_by_name: dict[str, RoutedNet]) -> list[str]:
+        scored: list[tuple[int, str]] = []
+        for net in circuit.nets:
+            route = routes_by_name.get(net.name)
+            if not route:
+                continue
+            meta = route.metadata.get("route_style", {})
+            if meta.get("manual_override") is not None:
+                continue
+            endpoint_count = int(meta.get("endpoint_count", len(route.endpoints)))
+            if endpoint_count <= 1:
+                continue
+            selected = str(meta.get("selected_style", ""))
+            direct_status = str(meta.get("direct_drc_status", ""))
+            estimated_length = int(meta.get("estimated_direct_length", 0))
+            priority = 40
+            if net.name in POWER_NET_NAMES:
+                priority = 0
+            elif direct_status != "clean_estimate":
+                priority = 5
+            elif selected != NetRouteStyle.DIRECT.value:
+                priority = 10
+            elif endpoint_count != 2:
+                priority = 15
+            elif estimated_length > 360:
+                priority = 20
+            elif len(circuit.nets) <= self.max_auto_validated_nets:
+                priority = 25
+            else:
+                continue
+            scored.append((priority, net.name))
+        scored.sort(key=lambda item: (item[0], item[1]))
+        return [net_name for _, net_name in scored[: self.max_auto_validated_nets]]
+
+    def _candidate_styles_for_net(self, net_name: str, endpoint_count: int) -> list[NetRouteStyle]:
+        if net_name in POWER_NET_NAMES:
+            return [NetRouteStyle.POWER_SYMBOL, NetRouteStyle.DIRECT, NetRouteStyle.LABEL]
+        if endpoint_count > 1:
+            return [NetRouteStyle.DIRECT, NetRouteStyle.LABEL]
+        return [NetRouteStyle.DIRECT]
+
+    def _evaluate_route_style_candidate(
+        self,
+        circuit: Circuit,
+        library: ComponentLibrary,
+        layout: Layout,
+        net_name: str,
+        style: NetRouteStyle,
+        baseline_counts: Counter[str],
+        baseline_route: RoutedNet,
+    ) -> NetRouteStyleCandidate:
+        candidate_routes = self._route_core(circuit, library, layout, auto_style_overrides={net_name: style})
+        candidate_route = next((route for route in candidate_routes if route.name == net_name), RoutedNet(name=net_name))
+        scene = build_schematic_scene(circuit, library, layout, candidate_routes)
+        visual_diagnostics, _ = visual_drc_from_scene(scene)
+        new_visual_diagnostics = self._diagnostic_delta(visual_diagnostics, baseline_counts)
+        routing_succeeded = not candidate_route.warnings
+        actual_length = self._route_length(candidate_route)
+        bend_count = self._route_bend_count(candidate_route)
+        label_count = sum(1 for element in scene.elements if element.net_name == net_name and element.kind == "net_label")
+        symbol_count = sum(1 for element in scene.elements if element.net_name == net_name and element.kind in {"power_symbol", "ground_symbol"})
+        estimated_length = float(baseline_route.metadata.get("route_style", {}).get("estimated_direct_length", actual_length))
+        rejection_reasons = []
+        if not routing_succeeded:
+            rejection_reasons.append("ROUTING_FAILED")
+        rejection_reasons.extend(sorted({diag.code or "VISUAL_DRC" for diag in new_visual_diagnostics}))
+        readability_score = self._route_style_readability_score(style, candidate_route, visual_diagnostics, new_visual_diagnostics, label_count, symbol_count)
+        return NetRouteStyleCandidate(
+            net_name=net_name,
+            style=style,
+            routing_succeeded=routing_succeeded,
+            visual_diagnostics=visual_diagnostics,
+            new_visual_diagnostics=new_visual_diagnostics,
+            estimated_length=estimated_length,
+            actual_length=float(actual_length),
+            bend_count=bend_count,
+            label_count=label_count,
+            symbol_count=symbol_count,
+            readability_score=readability_score,
+            rejection_reasons=rejection_reasons,
+        )
+
+    def _select_route_style_candidate(self, candidates: list[NetRouteStyleCandidate]) -> NetRouteStyleCandidate:
+        return min(
+            candidates,
+            key=lambda candidate: (
+                len(candidate.new_visual_diagnostics),
+                0 if candidate.routing_succeeded else 1,
+                len(candidate.visual_diagnostics),
+                candidate.readability_score,
+                self._route_style_tie_breaker(candidate.style),
+            ),
+        )
+
+    def _route_style_validation_record(
+        self,
+        net_name: str,
+        baseline_route: RoutedNet,
+        candidates: list[NetRouteStyleCandidate],
+        selected: NetRouteStyleCandidate,
+    ) -> dict[str, Any]:
+        diagnostics_by_candidate = {candidate.style.value: candidate.as_metadata() for candidate in candidates}
+        candidate_styles = [candidate.style.value for candidate in candidates]
+        has_clean_candidate = any(not candidate.new_visual_diagnostics and candidate.routing_succeeded for candidate in candidates)
+        reason = "scene DRC candidate validation selected cleanest readable route"
+        warning = None
+        if selected.new_visual_diagnostics or not selected.routing_succeeded:
+            reason = "all route-style candidates had issues; selected least-bad candidate"
+            warning = f"Route-style AUTO for {net_name} selected {selected.style.value} with candidate issues"
+        return {
+            "reason": reason,
+            "candidate_validation": "scene_drc",
+            "validation_scope": "bounded_auto_net",
+            "candidates_considered": candidate_styles,
+            "diagnostics_by_candidate": diagnostics_by_candidate,
+            "actual_or_estimated_lengths": {candidate.style.value: candidate.actual_length or candidate.estimated_length for candidate in candidates},
+            "bend_counts": {candidate.style.value: candidate.bend_count for candidate in candidates},
+            "label_counts": {candidate.style.value: candidate.label_count for candidate in candidates},
+            "symbol_counts": {candidate.style.value: candidate.symbol_count for candidate in candidates},
+            "has_clean_candidate": has_clean_candidate,
+            "route_style_warning": warning,
+            "selected_candidate": selected.as_metadata(),
+            "initial_heuristic_style": baseline_route.metadata.get("route_style", {}).get("selected_style"),
+        }
+
+    def _diagnostic_delta(self, diagnostics: list[Diagnostic], baseline_counts: Counter[str]) -> list[Diagnostic]:
+        used: Counter[str] = Counter()
+        delta: list[Diagnostic] = []
+        for diag in diagnostics:
+            code = diag.code or ""
+            if code and used[code] < baseline_counts.get(code, 0):
+                used[code] += 1
+            else:
+                delta.append(diag)
+        return delta
+
+    def _route_style_readability_score(
+        self,
+        style: NetRouteStyle,
+        route: RoutedNet,
+        visual_diagnostics: list[Diagnostic],
+        new_visual_diagnostics: list[Diagnostic],
+        label_count: int,
+        symbol_count: int,
+    ) -> float:
+        length = self._route_length(route)
+        bends = self._route_bend_count(route)
+        score = len(new_visual_diagnostics) * 1_000_000 + len(visual_diagnostics) * 25_000
+        score += length * 0.5 + bends * 120 + label_count * 80 + symbol_count * 50
+        if style == NetRouteStyle.POWER_SYMBOL and route.name in POWER_NET_NAMES:
+            score -= 120
+        if style == NetRouteStyle.DIRECT and len(route.endpoints) == 2 and length <= 420:
+            score -= 80
+        if style == NetRouteStyle.LABEL and (len(route.endpoints) > 2 or length > 700):
+            score -= 60
+        return score
+
+    def _route_style_tie_breaker(self, style: NetRouteStyle) -> int:
+        return {
+            NetRouteStyle.POWER_SYMBOL: 0,
+            NetRouteStyle.DIRECT: 1,
+            NetRouteStyle.LABEL: 2,
+            NetRouteStyle.AUTO: 3,
+        }[style]
+
+    def _route_length(self, route: RoutedNet) -> int:
+        return sum(abs(x1 - x2) + abs(y1 - y2) for x1, y1, x2, y2 in route.segments)
+
+    def _route_bend_count(self, route: RoutedNet) -> int:
+        bends = 0
+        previous_orientation: str | None = None
+        previous_end: tuple[int, int] | None = None
+        for segment in route.segments:
+            x1, y1, x2, y2 = segment
+            orientation = "vertical" if x1 == x2 else "horizontal" if y1 == y2 else "diagonal"
+            start = (x1, y1)
+            end = (x2, y2)
+            if previous_orientation and previous_end == start and previous_orientation != orientation:
+                bends += 1
+            previous_orientation = orientation
+            previous_end = end
+        return bends
 
     def _estimated_direct_length(self, points: list[tuple[int, int]]) -> int:
         if len(points) < 2:

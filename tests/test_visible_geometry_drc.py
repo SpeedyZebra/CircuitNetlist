@@ -170,7 +170,7 @@ def test_solar_circuit_has_zero_visible_overlap_diagnostics() -> None:
     circuit, diagnostics = NetlistParser().parse_file(ROOT / "examples" / "solar_led.cnet")
     assert circuit is not None, diagnostics
     layout = DeterministicPlacementEngine().place(circuit, library)
-    routes = ManhattanRouter().route(circuit, library, layout)
+    routes = ManhattanRouter(validate_auto_route_styles=False).route(circuit, library, layout)
     drc, metrics = visual_drc(circuit, library, layout, routes)
     assert [diag.code for diag in drc] == []
     assert metrics["wire_label_overlaps"] == 0

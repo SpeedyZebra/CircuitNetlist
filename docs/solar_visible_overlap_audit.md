@@ -26,9 +26,9 @@ During the fix, pin escape corridor scoring exposed a second solar hazard:
 
 The scorer previously treated visible component-symbol clearance as softer than label/text reservations. QA-2 changed that to a hard placement cost matching DRC.
 
-## SUN_SENSE Audit
+## Sense/Control Net Audit
 
-`SUN_SENSE` is label-routed because it is a named sense/control net crossing functional groups. After QA-2, its label flags and stubs reserve exact visible geometry. The final scene has no `SUN_SENSE` wire/label/stub/symbol overlap diagnostics.
+Solar sense/control nets are routed by generic heuristics and bounded scene validation, not exact production-code net-name policy. Generic tokens such as `SENSE` and `ENABLE`, endpoint count, route distance, and visual-DRC candidate results explain label/direct choices. After QA-3, the router contains no exact `SUN_SENSE`, `LED_ENABLE`, or `PANEL_POS` policy branch. The final scene has no `SUN_SENSE`, `LED_ENABLE`, or `VBAT` wire/label/stub/symbol overlap diagnostics.
 
 ## After Fix
 

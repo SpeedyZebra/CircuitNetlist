@@ -19,12 +19,13 @@ from .exporters import export_png_from_scene, export_svg_from_scene
 from .models import Circuit, Diagnostic, Layout, RoutedNet, Severity
 from .parser import NetlistParser
 from .placement import DeterministicPlacementEngine
-from .regression import extra_regression_checks, visual_drc_from_scene
+from .regression import extra_regression_checks
 from .router import ManhattanRouter
 from .scene import SchematicScene
 from .scene_builder import build_schematic_scene
 from .topology import TopologyAnalyzer
 from .validator import CircuitValidator, has_blocking_diagnostics
+from .visual_drc import visual_drc_from_scene
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -101,10 +102,11 @@ def load_manifest_cases(path: Path, classification: str) -> list[AuditCase]:
 
 
 class CircuitAuditRunner:
-    def __init__(self, output_root: Path = DEFAULT_OUTPUT_ROOT, library: ComponentLibrary | None = None) -> None:
-        self.output_root = output_root
+    def __init__(self, output_root: Path = DEFAULT_OUTPUT_ROOT, library: ComponentLibrary | None = None, validate_route_styles: bool = True) -> None:
+        self.output_root = output_root.expanduser().resolve()
         self.library = library or load_component_library(ROOT / "components")
         self.parser = NetlistParser()
+        self.validate_route_styles = validate_route_styles
 
     def run(self, cases: list[AuditCase]) -> list[AuditResult]:
         self._prepare_output_dirs()
@@ -195,7 +197,8 @@ class CircuitAuditRunner:
 
     def _route(self, circuit: Circuit, layout: Layout, result: AuditResult, diagnostics: list[Diagnostic]) -> list[RoutedNet]:
         try:
-            routes = ManhattanRouter().route(circuit, self.library, layout)
+            router = ManhattanRouter.for_audit() if self.validate_route_styles else ManhattanRouter.for_interactive()
+            routes = router.route(circuit, self.library, layout)
             routing_diagnostics = _routing_diagnostics(routes)
             diagnostics.extend(routing_diagnostics)
             result.stages["routing"] = "fail" if routing_diagnostics else "pass"
@@ -226,7 +229,7 @@ class CircuitAuditRunner:
                 diagnostics.append(Diagnostic(severity=Severity.ERROR, code="EXPORT_SVG_INVALID", message="SVG export did not produce an SVG document"))
                 result.stages["svg_export"] = "fail"
             else:
-                result.svg_path = str(svg_path.relative_to(ROOT))
+                result.svg_path = _display_path(svg_path)
                 result.stages["svg_export"] = "pass"
         except Exception as exc:
             diagnostics.append(_exception_diagnostic("EXPORT_SVG_FAILED", "SVG export failed", exc))
@@ -238,7 +241,7 @@ class CircuitAuditRunner:
                 diagnostics.append(Diagnostic(severity=Severity.ERROR, code="EXPORT_PNG_INVALID", message="PNG export did not produce valid PNG bytes"))
                 result.stages["png_export"] = "fail"
             else:
-                result.png_path = str(png_path.relative_to(ROOT))
+                result.png_path = _display_path(png_path)
                 result.stages["png_export"] = "pass"
         except RuntimeError as exc:
             result.stages["png_export"] = "unavailable"
@@ -354,6 +357,14 @@ def _bounds_finite(bounds: Any) -> bool:
 
 def _exception_diagnostic(code: str, message: str, exc: Exception) -> Diagnostic:
     return Diagnostic(severity=Severity.ERROR, code=code, message=f"{message}: {exc}", metadata={"exception_type": type(exc).__name__})
+
+
+def _display_path(path: Path) -> str:
+    resolved = path.expanduser().resolve()
+    try:
+        return str(resolved.relative_to(ROOT))
+    except ValueError:
+        return str(resolved)
 
 
 def _required_stages(case: AuditCase) -> list[str]:

@@ -231,3 +231,53 @@ Still intentionally limited to QA-2 scope:
 - No Playwright execution or browser-test expansion.
 - No major router replacement or placement architecture rewrite.
 - Direct-vs-label AUTO validation uses deterministic component-obstacle estimates; full scene candidate comparison for every route style remains future work.
+
+## Milestone QA-3 - shared visual DRC and route-style validation
+
+Status: complete
+
+Implemented in this branch:
+
+- Centralized visual DRC in `src/circuit_netlist/visual_drc.py`.
+- Regression, circuit audit, app/API rendering, and route-validated placement now import the shared visual DRC module.
+- Removed the optimizer's duplicate local visual DRC implementation.
+- AUTO route style now performs bounded scene/visual-DRC candidate validation for prioritized nets.
+- Route-style debug metadata now records candidates considered, diagnostics by candidate, lengths, bend counts, label/symbol counts, selected candidate, and validation scope.
+- Removed exact solar/example-specific net-name routing policy from production router code.
+- Preserved semantic power/ground net handling for global rails.
+- Fixed `circuit_audit --output` path handling for relative paths, absolute paths, and output directories outside the repo.
+- Clarified physical fixture circuits versus embedded unit-test netlists in inventory and quality-gate docs.
+- Added pytest markers for `unit`, `integration`, `audit`, and `slow`, plus a documented fast development command.
+- Documentation in `docs/visual_drc_architecture.md`, `docs/route_style_validation.md`, and `docs/testing_strategy.md`.
+
+Still intentionally limited to QA-3 scope:
+
+- Route-style candidate validation is bounded and prioritized, not a full global route-style search.
+- The router remains the existing Manhattan router; QA-3 does not introduce a major routing replacement.
+- Playwright execution remains deferred.
+- Simulation remains deferred.
+
+## Milestone QA-4 - interactive render speed
+
+Status: complete
+
+Implemented in this branch:
+
+- Added `RenderQualityMode` with `interactive`, `strict`, and `audit`.
+- Added `ManhattanRouter.for_interactive()`, `for_strict()`, and `for_audit()`.
+- Browser load, reroute, scene, component details, net details, and export paths default to interactive mode.
+- Interactive mode disables per-net scene-validated AUTO route-style candidate search.
+- Interactive mode uses placement optimizer mode `off` for normal app rendering.
+- Strict regression keeps scene-validated AUTO route-style checks.
+- Circuit audit explicitly uses audit router mode.
+- Added one central app render pipeline returning circuit, diagnostics, layout, routes, scene, SVG, metrics, and timing.
+- Added a current schematic render cache keyed by source, layout, quality mode, and component-library signature.
+- Component details and net details reuse cached render context when valid.
+- Autoroute now performs one interactive route/scene/render pipeline instead of rerouting after `build_current`.
+- Render timing metadata is exposed for debugging.
+- Documentation in `docs/render_quality_modes.md`.
+
+Still intentionally limited to QA-4 scope:
+
+- Interactive mode still builds the final scene and runs visual DRC once; scene construction remains the largest remaining hot-path cost.
+- No new router algorithm, placement rewrite, Playwright execution, or simulation engine.

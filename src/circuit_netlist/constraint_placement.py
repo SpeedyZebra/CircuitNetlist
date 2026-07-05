@@ -8,12 +8,13 @@ from typing import Any, Iterable
 
 from .component_library import ComponentLibrary
 from .diagnostics import diagnostic_code_counts
-from .geometry import absolute_pin_point, boxes_overlap, component_body_box, component_size, inflate_box, is_orientation_sensitive, segment_crosses_box, segments_collinear_overlap, visual_pin_side
+from .geometry import absolute_pin_point, boxes_overlap, component_body_box, component_size, inflate_box, is_orientation_sensitive, visual_pin_side
 from .models import Circuit, Diagnostic, Layout, Placement, Severity
 from .router import ManhattanRouter
 from .scene import Bounds, SchematicScene
 from .scene_builder import build_schematic_scene
 from .topology import ComponentRole, MIN_PLACEMENT_PATTERN_CONFIDENCE, PatternType, TopologyAnalysis, TopologyAnalyzer, TopologyPattern
+from .visual_drc import visual_drc_from_scene, wire_like_segments_from_scene
 
 
 class ConstraintSeverity(str, Enum):
@@ -471,6 +472,10 @@ class ConstraintPlacementOptimizer:
         initial = initial_layout.model_copy(deep=True)
         working = initial_layout.model_copy(deep=True)
         initial_score = self.scorer.score(circuit, library, initial, analysis, fixed_refs=fixed_refs, fixed_layout=initial)
+        if self.config.mode not in {"optimize", "score_only"}:
+            fast_path = "optimizer_off"
+            comparison = PlacementComparison(initial_score, initial_score, 0, 0, 0, (perf_counter() - start) * 1000, False, None, fast_path, [], [], None, None)
+            return PlacementOptimizationResult(initial, initial, comparison)
         initial_evaluation = self.evaluate_layout(circuit, library, initial, analysis, initial_score, baseline_counts=None, fixed_refs=fixed_refs, fixed_layout=initial, initial_layout=initial)
         baseline_counts = _diagnostic_counts(initial_evaluation.visual_diagnostics)
         initial_evaluation = self.evaluate_layout(circuit, library, initial, analysis, initial_score, baseline_counts=baseline_counts, fixed_refs=fixed_refs, fixed_layout=initial, initial_layout=initial)
@@ -486,10 +491,6 @@ class ConstraintPlacementOptimizer:
         fast_path: str | None = None
         budget_start = perf_counter()
 
-        if self.config.mode not in {"optimize", "score_only"}:
-            fast_path = "optimizer_off"
-            comparison = PlacementComparison(initial_score, initial_score, 0, 0, 0, (perf_counter() - start) * 1000, False, None, fast_path, [], [], initial_evaluation, initial_evaluation)
-            return PlacementOptimizationResult(initial, initial, comparison)
         if self.config.mode == "score_only":
             fast_path = "score_only"
             comparison = PlacementComparison(initial_score, initial_score, 0, 0, 0, (perf_counter() - start) * 1000, False, None, fast_path, [], [], initial_evaluation, initial_evaluation)
@@ -608,13 +609,13 @@ class ConstraintPlacementOptimizer:
         rejection_reasons: list[str] = []
         if placement_score.hard_violation_count:
             rejection_reasons.append("HARD_CONSTRAINT_VIOLATION")
-        routes = ManhattanRouter().route(circuit, library, layout)
+        routes = ManhattanRouter(validate_auto_route_styles=False).route(circuit, library, layout)
         route_warnings = [warning for route in routes for warning in route.warnings]
         routing_succeeded = not route_warnings
         if not routing_succeeded:
             rejection_reasons.append("ROUTING_FAILED")
         scene = build_schematic_scene(circuit, library, layout, routes)
-        visual_diagnostics, visual_metrics = _visual_drc_from_scene(scene)
+        visual_diagnostics, visual_metrics = visual_drc_from_scene(scene)
         expected_visual, unexpected_visual = _split_visual_diagnostics(visual_diagnostics, baseline_counts)
         if unexpected_visual:
             rejection_reasons.append("NEW_VISUAL_DRC")
@@ -880,69 +881,11 @@ class ConstraintPlacementOptimizer:
         layout.canvas["height"] = max(int(layout.canvas.get("height", 0)), _snap(max_y + 220, self.config.grid))
 
 
-def _visual_drc_from_scene(scene: SchematicScene) -> tuple[list[Diagnostic], dict[str, Any]]:
-    diagnostics: list[Diagnostic] = []
-    body_boxes: list[tuple[str, tuple[float, float, float, float]]] = []
-    symbol_boxes: list[tuple[str, tuple[float, float, float, float]]] = []
-    text_boxes: list[tuple[str, tuple[float, float, float, float]]] = []
-    physical_text_boxes: list[tuple[str, tuple[float, float, float, float]]] = []
-    pin_points: dict[str, set[tuple[int, int]]] = {}
-    for element in scene.elements:
-        if element.kind == "component_body" and element.component_ref:
-            body_boxes.append((element.component_ref, _element_rect_box(element) or element.active_collision_bounds().as_tuple()))
-        if element.kind == "component_symbol" and element.component_ref:
-            symbol_boxes.append((element.component_ref, element.active_collision_bounds().as_tuple()))
-        if element.kind == "pin" and element.component_ref:
-            pin_points.setdefault(element.component_ref, set()).add(_pin_center(element))
-        if element.text and element.metadata.get("drc_wire_text", True):
-            item = (element.component_ref or "", element.text.bounds.as_tuple())
-            text_boxes.append(item)
-            if element.metadata.get("physical_wire_text_drc"):
-                physical_text_boxes.append(item)
-
-    wire_like = _wire_like_segments_from_scene(scene)
-    component_overlaps = sum(1 for index, (_, box) in enumerate(body_boxes) for _, other in body_boxes[index + 1 :] if boxes_overlap(box, other))
-    wire_symbol_overlaps = 0
-    for _, _, source_ref, segment in wire_like:
-        for ref, box in symbol_boxes:
-            if ref == source_ref or (segment[0], segment[1]) in pin_points.get(ref, set()) or (segment[2], segment[3]) in pin_points.get(ref, set()):
-                continue
-            if segment_crosses_box(segment, box):
-                wire_symbol_overlaps += 1
-    wire_text_overlaps = sum(1 for _, _, _, segment in wire_like for ref, box in text_boxes if not _segment_touches_component_pin(segment, pin_points.get(ref, set())) and segment_crosses_box(segment, inflate_box(box, 8)))
-    physical_wire_text_overlaps = sum(1 for _, kind, _, segment in wire_like if kind == "wire" for ref, box in physical_text_boxes if not _segment_touches_component_pin(segment, pin_points.get(ref, set())) and segment_crosses_box(segment, inflate_box(box, 8)))
-    wire_overlaps = sum(1 for index, a in enumerate(wire_like) for b in wire_like[index + 1 :] if a[0] != b[0] and segments_collinear_overlap(a[3], b[3]))
-
-    if component_overlaps:
-        diagnostics.append(Diagnostic(severity=Severity.ERROR, code="DRC_COMPONENT_OVERLAP", message=f"{component_overlaps} component body overlaps"))
-    if wire_symbol_overlaps:
-        diagnostics.append(Diagnostic(severity=Severity.ERROR, code="DRC_WIRE_SYMBOL_OVERLAP", message=f"{wire_symbol_overlaps} wire/symbol overlaps"))
-    if wire_overlaps:
-        diagnostics.append(Diagnostic(severity=Severity.WARNING, code="DRC_WIRE_WIRE_OVERLAP", message=f"{wire_overlaps} unrelated wire overlaps"))
-    if physical_wire_text_overlaps:
-        diagnostics.append(Diagnostic(severity=Severity.WARNING, code="DRC_WIRE_TEXT_OVERLAP", message=f"{physical_wire_text_overlaps} physical wire/text overlaps"))
-
-    total_wire_length = sum(abs(x1 - x2) + abs(y1 - y2) for _, _, _, (x1, y1, x2, y2) in wire_like)
-    metrics = {
-        "component_body_overlaps": component_overlaps,
-        "wire_symbol_overlaps": wire_symbol_overlaps,
-        "wire_text_overlaps": wire_text_overlaps,
-        "physical_wire_text_overlaps": physical_wire_text_overlaps,
-        "unrelated_wire_overlaps": wire_overlaps,
-        "total_wire_length": total_wire_length,
-        "physical_wire_segments": sum(1 for _, kind, _, _ in wire_like if kind == "wire"),
-        "net_labels": sum(1 for element in scene.elements if element.kind == "net_label" and element.metadata.get("attachment")),
-        "power_symbols": sum(1 for element in scene.elements if element.kind in {"power_symbol", "ground_symbol"}),
-        "orientations": scene.metadata.get("orientations", {}),
-    }
-    return diagnostics, metrics
-
-
 def _routed_metrics(scene: SchematicScene, visual_metrics: dict[str, Any]) -> dict[str, object]:
-    wire_like = _wire_like_segments_from_scene(scene)
+    wire_like = wire_like_segments_from_scene(scene)
     lengths_by_net: dict[str, float] = {}
     segments_by_net: dict[str, list[tuple[int, int, int, int]]] = {}
-    for net_name, _, _, segment in wire_like:
+    for net_name, _, _, segment, *_ in wire_like:
         length = abs(segment[0] - segment[2]) + abs(segment[1] - segment[3])
         lengths_by_net[net_name] = lengths_by_net.get(net_name, 0.0) + length
         segments_by_net.setdefault(net_name, []).append(segment)
@@ -951,7 +894,7 @@ def _routed_metrics(scene: SchematicScene, visual_metrics: dict[str, Any]) -> di
     content_bounds = _content_bounds(scene)
     scene_area = max(content_bounds.width, 0) * max(content_bounds.height, 0)
     component_area = sum(element.bounds.width * element.bounds.height for element in scene.elements if element.kind == "component_body")
-    diagnostic_counts = Counter(diag.code or "" for diag in _visual_drc_from_scene(scene)[0])
+    diagnostic_counts = Counter(diag.code or "" for diag in visual_drc_from_scene(scene)[0])
     return {
         "total_routed_length": total_length,
         "wire_segment_count": len(wire_like),
@@ -969,50 +912,6 @@ def _routed_metrics(scene: SchematicScene, visual_metrics: dict[str, Any]) -> di
         **{f"visual_diagnostic_{code}": count for code, count in sorted(diagnostic_counts.items()) if code},
         **{key: value for key, value in visual_metrics.items() if isinstance(value, (int, float))},
     }
-
-
-def _wire_like_segments_from_scene(scene: SchematicScene) -> list[tuple[str, str, str, tuple[int, int, int, int]]]:
-    segments: list[tuple[str, str, str, tuple[int, int, int, int]]] = []
-    for element in scene.elements:
-        if element.kind not in {"wire", "wire_stub"}:
-            continue
-        segment = _line_segment_from_element(element)
-        if not segment:
-            continue
-        segments.append((element.net_name or "", str(element.metadata.get("wire_kind", "wire")), str(element.metadata.get("source_ref", "")), segment))
-    return segments
-
-
-def _line_segment_from_element(element: Any) -> tuple[int, int, int, int] | None:
-    primitive = next((primitive for primitive in element.primitives if primitive.kind == "line"), None)
-    if primitive:
-        geometry = primitive.geometry
-        return (round(float(geometry["x1"])), round(float(geometry["y1"])), round(float(geometry["x2"])), round(float(geometry["y2"])))
-    segment = element.metadata.get("segment")
-    if segment and len(segment) == 4:
-        return (int(segment[0]), int(segment[1]), int(segment[2]), int(segment[3]))
-    return None
-
-
-def _element_rect_box(element: Any) -> tuple[float, float, float, float] | None:
-    primitive = next((primitive for primitive in element.primitives if primitive.kind == "rect"), None)
-    if not primitive:
-        return None
-    geometry = primitive.geometry
-    x = float(geometry["x"])
-    y = float(geometry["y"])
-    return (x, y, x + float(geometry["width"]), y + float(geometry["height"]))
-
-
-def _pin_center(element: Any) -> tuple[int, int]:
-    primitive = element.primitives[0].geometry if element.primitives else {}
-    if "cx" in primitive and "cy" in primitive:
-        return (round(float(primitive["cx"])), round(float(primitive["cy"])))
-    return (round((element.bounds.min_x + element.bounds.max_x) / 2), round((element.bounds.min_y + element.bounds.max_y) / 2))
-
-
-def _segment_touches_component_pin(segment: tuple[int, int, int, int], pins: set[tuple[int, int]]) -> bool:
-    return (segment[0], segment[1]) in pins or (segment[2], segment[3]) in pins
 
 
 def _content_bounds(scene: SchematicScene) -> Bounds:

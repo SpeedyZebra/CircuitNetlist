@@ -1,6 +1,6 @@
 # Visible Geometry DRC
 
-QA-2 extends visual DRC so it checks visible schematic geometry, not only component bodies and physical routed wires.
+QA-2 extends visual DRC so it checks visible schematic geometry, not only component bodies and physical routed wires. QA-3 moves the implementation into the shared production module `src/circuit_netlist/visual_drc.py`.
 
 ## Checked Geometry
 

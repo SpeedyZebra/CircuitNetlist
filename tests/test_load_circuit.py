@@ -6,6 +6,9 @@ from circuit_netlist.app import LayoutSaveRequest, LoadCaseRequest, LoadTextRequ
 from circuit_netlist.models import Layout
 
 
+pytestmark = [pytest.mark.integration, pytest.mark.slow]
+
+
 VALID_TEXT = """CIRCUIT Uploaded_LED
 
 COMPONENT V1 POWER_DC_SOURCE voltage=5V
@@ -121,11 +124,15 @@ def test_placement_score_endpoint_returns_current_optimizer_summary() -> None:
     app_module.load_case(LoadCaseRequest(case_id="example_solar_led"))
     payload = app_module.current_placement_score()
     assert payload["layout_available"] is True
-    assert payload["placement_optimizer"]["mode"] == "optimize"
+    assert payload["placement_optimizer"]["mode"] == "off"
+    assert payload["quality_mode"] == "interactive"
+    strict_payload = app_module.current_placement_score(quality="strict")
+    assert strict_payload["placement_optimizer"]["mode"] == "optimize"
     assert payload["placement_optimizer"]["optimized"]["hard_violation_count"] == 0
     assert "optimized_routed" in payload["placement_optimizer"]
     assert "route_validations" in payload["placement_optimizer"]
-    assert payload["placement_optimizer"]["optimized_routed"]["routing_succeeded"] is True
+    assert payload["placement_optimizer"]["optimized_routed"] is None
+    assert strict_payload["placement_optimizer"]["optimized_routed"]["routing_succeeded"] is True
 
 
 def test_regression_expected_summary_for_good_and_fault_cases() -> None:

@@ -1,5 +1,7 @@
 from pathlib import Path
 
+import pytest
+
 from circuit_netlist import app as app_module
 from circuit_netlist.app import LoadCaseRequest, NetRouteStyleRequest, apply_net_route_style
 from circuit_netlist.component_library import load_component_library
@@ -10,6 +12,7 @@ from circuit_netlist.router import ManhattanRouter
 
 
 ROOT = Path(__file__).resolve().parents[1]
+pytestmark = pytest.mark.slow
 
 
 def load_solar():
@@ -92,7 +95,9 @@ def test_auto_route_style_chooses_direct_for_close_simple_net() -> None:
     route = route_by_name(circuit, library, layout)["LOCAL"]
     assert route.render_style == "local_wire"
     assert route.metadata["route_style"]["selected_style"] == "direct"
-    assert route.metadata["route_style"]["direct_drc_status"] == "clean_estimate"
+    assert route.metadata["route_style"]["direct_drc_status"] == "scene_clean"
+    assert route.metadata["route_style"]["candidate_validation"] == "scene_drc"
+    assert "direct" in route.metadata["route_style"]["candidates_considered"]
 
 
 def test_auto_route_style_chooses_label_for_obstructed_direct_candidate() -> None:
@@ -101,7 +106,8 @@ def test_auto_route_style_chooses_label_for_obstructed_direct_candidate() -> Non
     route = route_by_name(circuit, library, layout)["CROSS_BLOCK"]
     assert route.render_style == "net_label"
     assert route.metadata["route_style"]["selected_style"] == "label"
-    assert route.metadata["route_style"]["direct_drc_status"] == "blocked_by_component_estimate"
+    assert route.metadata["route_style"]["direct_drc_status"] == "scene_drc_failed"
+    assert route.metadata["route_style"]["label_drc_status"] == "scene_clean"
 
 
 def test_auto_route_style_chooses_power_symbol_for_global_rails() -> None:
@@ -109,6 +115,22 @@ def test_auto_route_style_chooses_power_symbol_for_global_rails() -> None:
     routes = route_by_name(circuit, library, layout)
     assert routes["VBAT"].render_style == "power_symbol"
     assert routes["GND"].render_style == "power_symbol"
+    assert routes["VBAT"].metadata["route_style"]["candidate_validation"] == "scene_drc"
+    assert routes["GND"].metadata["route_style"]["candidate_validation"] == "scene_drc"
+
+
+def test_route_style_candidate_debug_metadata_is_exposed() -> None:
+    library = load_component_library(ROOT / "components")
+    circuit, layout = obstructed_two_pin_circuit()
+    route = route_by_name(circuit, library, layout)["CROSS_BLOCK"]
+    metadata = route.metadata["route_style"]
+    assert metadata["candidate_validation"] == "scene_drc"
+    assert metadata["candidates_considered"] == ["direct", "label"]
+    assert set(metadata["diagnostics_by_candidate"]) == {"direct", "label"}
+    assert metadata["diagnostics_by_candidate"]["direct"]["new_visual_diagnostic_codes"]
+    assert metadata["diagnostics_by_candidate"]["label"]["new_visual_diagnostic_codes"] == []
+    assert metadata["actual_or_estimated_lengths"]["direct"] >= 0
+    assert metadata["bend_counts"]["label"] == 0
 
 
 def test_route_style_api_preserves_connectivity_and_exposes_net_details() -> None:
@@ -135,3 +157,20 @@ def test_frontend_source_exposes_route_style_control_for_wires_and_labels() -> N
     assert '["direct", "Direct wire"]' in source
     assert '["label", "Net labels"]' in source
     assert '["power_symbol", "Power symbols"]' in source
+
+
+def test_router_policy_does_not_hardcode_example_specific_solar_net_names() -> None:
+    source = (ROOT / "src" / "circuit_netlist" / "router.py").read_text(encoding="utf-8")
+    for forbidden in ("SUN_SENSE", "BAT_SENSE", "LED_ENABLE", "LED_ANODE", "LED_SWITCH", "PANEL_POS", "LABEL_PREFERRED_NETS"):
+        assert forbidden not in source
+
+
+def test_solar_route_styles_are_explained_without_exact_net_name_policy() -> None:
+    circuit, library, layout = load_solar()
+    routes = route_by_name(circuit, library, layout)
+    assert routes["GND"].metadata["route_style"]["reason"] == "scene DRC candidate validation selected cleanest readable route"
+    assert routes["VBAT"].metadata["route_style"]["reason"] == "scene DRC candidate validation selected cleanest readable route"
+    assert routes["LED_ENABLE"].metadata["route_style"]["reason"] in {
+        "generic control or sense net prefers labels",
+        "scene DRC candidate validation selected cleanest readable route",
+    }

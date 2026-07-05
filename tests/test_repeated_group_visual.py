@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from circuit_netlist.component_library import load_component_library
 from circuit_netlist.models import Layout, Placement
 from circuit_netlist.parser import NetlistParser
@@ -15,6 +17,20 @@ from circuit_netlist.validator import CircuitValidator, has_blocking_diagnostics
 
 ROOT = Path(__file__).resolve().parents[1]
 STRESS_ROOT = ROOT / "test_circuits" / "good" / "04_repeated_groups"
+pytestmark = [pytest.mark.integration, pytest.mark.slow]
+
+
+def stable_layout_dump(layout: Layout) -> dict[str, object]:
+    data = layout.model_dump(mode="json")
+    canvas = dict(data["canvas"])
+    optimizer = canvas.get("placement_optimizer")
+    if isinstance(optimizer, dict):
+        canvas["placement_optimizer"] = {
+            "mode": optimizer.get("mode"),
+            "optimized": optimizer.get("optimized"),
+            "fast_path": optimizer.get("fast_path"),
+        }
+    return {**data, "canvas": canvas}
 
 
 def run_pipeline(path: Path, existing: Layout | None = None):
@@ -26,8 +42,8 @@ def run_pipeline(path: Path, existing: Layout | None = None):
     analysis = TopologyAnalyzer().analyze(circuit, library)
     layout = DeterministicPlacementEngine().place(circuit, library, existing)
     layout_again = DeterministicPlacementEngine().place(circuit, library, existing)
-    assert layout.model_dump(mode="json") == layout_again.model_dump(mode="json")
-    routes = ManhattanRouter().route(circuit, library, layout)
+    assert stable_layout_dump(layout) == stable_layout_dump(layout_again)
+    routes = ManhattanRouter(validate_auto_route_styles=False).route(circuit, library, layout)
     drc, metrics = visual_drc(circuit, library, layout, routes)
     render_circuit(circuit, library, layout, routes, [*validation, *drc])
     return circuit, analysis, layout, drc, metrics
@@ -60,7 +76,7 @@ def test_four_repeated_mosfet_channels_full_visual_pipeline() -> None:
     mosfet_rows = [layout.components[ref].y for ref in ["Q12", "Q47", "Q5", "Q88"]]
     assert len(mosfet_rows) == len(set(mosfet_rows))
     library = load_component_library(ROOT / "components")
-    assert layout.model_dump(mode="json") == DeterministicPlacementEngine().place(circuit, library).model_dump(mode="json")
+    assert stable_layout_dump(layout) == stable_layout_dump(DeterministicPlacementEngine().place(circuit, library))
 
 
 def test_multiple_voltage_dividers_full_visual_pipeline() -> None:

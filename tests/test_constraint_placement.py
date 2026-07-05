@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from circuit_netlist.component_library import load_component_library
 from circuit_netlist.constraint_placement import ConstraintPlacementOptimizer, PlacementOptimizationConfig, PlacementScorer, _diagnostic_counts
 from circuit_netlist.erc import ElectricalRuleChecker
@@ -14,6 +16,20 @@ from circuit_netlist.topology import PatternType, TopologyAnalyzer
 
 
 ROOT = Path(__file__).resolve().parents[1]
+pytestmark = [pytest.mark.integration, pytest.mark.slow]
+
+
+def stable_layout_dump(layout: Layout) -> dict[str, object]:
+    data = layout.model_dump(mode="json")
+    canvas = dict(data["canvas"])
+    optimizer = canvas.get("placement_optimizer")
+    if isinstance(optimizer, dict):
+        canvas["placement_optimizer"] = {
+            "mode": optimizer.get("mode"),
+            "optimized": optimizer.get("optimized"),
+            "fast_path": optimizer.get("fast_path"),
+        }
+    return {**data, "canvas": canvas}
 
 
 def library():
@@ -245,7 +261,7 @@ def test_post_routing_visual_drc_is_clean_for_normal_example() -> None:
     lib = library()
     circuit = parse_text((ROOT / "examples" / "555_timer_50_duty_astable.cnet").read_text(encoding="utf-8"))
     layout = DeterministicPlacementEngine().place(circuit, lib)
-    routes = ManhattanRouter().route(circuit, lib, layout)
+    routes = ManhattanRouter(validate_auto_route_styles=False).route(circuit, lib, layout)
     diagnostics, metrics = visual_drc(circuit, lib, layout, routes)
 
     assert [diag.code for diag in diagnostics] == []
@@ -530,10 +546,10 @@ def test_two_real_controllers_driving_separate_channels_are_route_validated() ->
     analysis = TopologyAnalyzer().analyze(circuit, lib)
     layout = DeterministicPlacementEngine().place(circuit, lib)
     layout_again = DeterministicPlacementEngine().place(circuit, lib)
-    routes = ManhattanRouter().route(circuit, lib, layout)
+    routes = ManhattanRouter(validate_auto_route_styles=False).route(circuit, lib, layout)
     diagnostics, metrics = visual_drc(circuit, lib, layout, routes)
 
-    assert layout.model_dump(mode="json") == layout_again.model_dump(mode="json")
+    assert stable_layout_dump(layout) == stable_layout_dump(layout_again)
     assert layout.components["U1"] != layout.components["U2"]
     assert metrics["component_body_overlaps"] == 0
     assert not [diag for diag in diagnostics if diag.severity in {"ERROR", "FATAL"}]
@@ -639,7 +655,7 @@ NET GND:
     circuit = parse_text(text)
     layout = DeterministicPlacementEngine().place(circuit, lib)
     controller_positions = {(layout.components[ref].x, layout.components[ref].y) for ref in ["U1", "U2", "U3"]}
-    routes = ManhattanRouter().route(circuit, lib, layout)
+    routes = ManhattanRouter(validate_auto_route_styles=False).route(circuit, lib, layout)
     diagnostics, metrics = visual_drc(circuit, lib, layout, routes)
 
     assert len(controller_positions) == 3

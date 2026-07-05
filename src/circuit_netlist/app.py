@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
+from time import perf_counter
 from typing import Any
 
 from fastapi import FastAPI, HTTPException
@@ -13,16 +15,17 @@ from .component_library import ComponentLibrary, load_component_library
 from .erc import ElectricalRuleChecker
 from .exporters import export_png_bytes_from_scene, export_png_from_scene, export_svg
 from .hit_testing import hit_test_all
-from .models import Circuit, Diagnostic, Layout, NetRouteStyle, RenderedCircuit, Severity
+from .models import Circuit, Diagnostic, Layout, NetRouteStyle, RenderQualityMode, RenderedCircuit, Severity
 from .parser import NetlistParser
 from .placement import DeterministicPlacementEngine
-from .regression import compare_diagnostic_codes, detect_patterns, engineering_calculations, visual_drc, visual_drc_from_scene
-from .renderer import render_circuit
+from .constraint_placement import PlacementOptimizationConfig
+from .regression import compare_diagnostic_codes, detect_patterns, engineering_calculations
 from .router import ManhattanRouter
 from .scene_builder import build_schematic_scene
 from .scene_renderer import render_scene_svg
 from .topology import TopologyAnalyzer
 from .validator import CircuitValidator, has_blocking_diagnostics
+from .visual_drc import visual_drc_from_scene
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -88,6 +91,7 @@ CURRENT_STATE = CurrentCircuitState(
     source_text=EXAMPLE_NETLIST.read_text(encoding="utf-8") if EXAMPLE_NETLIST.exists() else None,
     layout_text=EXAMPLE_LAYOUT.read_text(encoding="utf-8") if EXAMPLE_LAYOUT.exists() else None,
 )
+CURRENT_RENDER_CACHE: dict[str, Any] = {"key": None, "context": None}
 
 
 def library() -> ComponentLibrary:
@@ -104,95 +108,193 @@ def write_layout(layout: Layout) -> None:
     EXAMPLE_LAYOUT.write_text(layout.model_dump_json(indent=2), encoding="utf-8")
 
 
-def build_current(layout_override: Layout | None = None, use_saved_layout: bool = True) -> RenderedCircuit:
-    lib = library()
-    parser = NetlistParser()
-    circuit, diagnostics = parser.parse_file(EXAMPLE_NETLIST)
-    diagnostics.extend(lib.diagnostics)
-    if circuit is None:
-        return RenderedCircuit(svg=render_error_svg(diagnostics), diagnostics=diagnostics, layout=Layout(), circuit=None)
-    diagnostics.extend(CircuitValidator(lib).validate(circuit))
-    existing_layout = layout_override if layout_override is not None else (read_layout() if use_saved_layout else None)
-    layout = DeterministicPlacementEngine().place(circuit, lib, existing_layout)
-    routes = []
-    if not has_blocking_diagnostics(diagnostics):
-        diagnostics.extend(ElectricalRuleChecker(lib).check(circuit))
-        routes = ManhattanRouter().route(circuit, lib, layout)
-        for route in routes:
-            for warning in route.warnings:
-                diagnostics.append(Diagnostic(severity=Severity.WARNING, message=warning))
-    svg = render_circuit(circuit, lib, layout, routes, diagnostics)
-    return RenderedCircuit(svg=svg, diagnostics=diagnostics, layout=layout, circuit=circuit)
+def invalidate_render_cache() -> None:
+    CURRENT_RENDER_CACHE["key"] = None
+    CURRENT_RENDER_CACHE["context"] = None
 
 
-def render_loaded_circuit(
+def normalized_quality(quality: RenderQualityMode | str = RenderQualityMode.INTERACTIVE) -> RenderQualityMode:
+    return quality if isinstance(quality, RenderQualityMode) else RenderQualityMode(quality)
+
+
+def layout_json(layout: Layout | None) -> str | None:
+    return layout.model_dump_json() if layout else None
+
+
+def canonical_layout_text(layout_text: str | None) -> str | None:
+    layout = parse_layout_text(layout_text)
+    return layout.model_dump_json() if layout else layout_text
+
+
+def component_library_signature() -> str:
+    parts = []
+    for path in sorted(COMPONENT_ROOT.rglob("*.yaml")):
+        stat = path.stat()
+        parts.append(f"{path.relative_to(COMPONENT_ROOT)}:{stat.st_mtime_ns}:{stat.st_size}")
+    return "|".join(parts)
+
+
+def render_cache_key(source_text: str, source_filename: str, layout_text: str | None, quality: RenderQualityMode) -> str:
+    payload = {
+        "source": source_text,
+        "filename": source_filename,
+        "layout": layout_text or "",
+        "quality": quality.value,
+        "library": component_library_signature(),
+    }
+    return hashlib.sha256(json.dumps(payload, sort_keys=True).encode("utf-8")).hexdigest()
+
+
+def placement_engine_for_quality(quality: RenderQualityMode, existing_layout: Layout | None) -> DeterministicPlacementEngine:
+    if quality == RenderQualityMode.INTERACTIVE:
+        return DeterministicPlacementEngine(optimization_config=PlacementOptimizationConfig(mode="off"))
+    return DeterministicPlacementEngine()
+
+
+def router_for_quality(quality: RenderQualityMode) -> ManhattanRouter:
+    return ManhattanRouter.for_quality(quality)
+
+
+def render_pipeline(
     text: str,
     filename: str,
-    source_kind: str,
-    circuit_id: str,
-    case_id: str | None = None,
     layout_text: str | None = None,
-    update_state: bool = True,
+    *,
+    layout_override: Layout | None = None,
+    quality: RenderQualityMode | str = RenderQualityMode.INTERACTIVE,
+    use_cache: bool = True,
 ) -> dict[str, Any]:
+    quality_mode = normalized_quality(quality)
+    effective_layout_text = layout_json(layout_override) if layout_override is not None else canonical_layout_text(layout_text)
+    lookup_key = render_cache_key(text, filename, effective_layout_text, quality_mode) if effective_layout_text is not None else None
+    if use_cache and lookup_key and CURRENT_RENDER_CACHE.get("key") == lookup_key:
+        context = CURRENT_RENDER_CACHE["context"]
+        if isinstance(context, dict):
+            context["cache_hit"] = True
+            metrics = context.get("metrics", {})
+            if isinstance(metrics, dict):
+                timing = metrics.get("timing", {})
+                if isinstance(timing, dict):
+                    timing["cache_hit"] = True
+            return context
+
+    total_start = perf_counter()
     lib = library()
     parser = NetlistParser()
+    parse_start = perf_counter()
     circuit, diagnostics = parser.parse_text(text, Path(filename))
+    diagnostics.extend(lib.diagnostics)
+    parse_time_ms = (perf_counter() - parse_start) * 1000
+
     validation_findings: list[Diagnostic] = []
     erc_findings: list[Diagnostic] = []
     drc_findings: list[Diagnostic] = []
     layout = Layout()
     routes = []
+    scene = None
     svg = render_error_svg(diagnostics)
-    render_allowed = circuit is not None
-    layout_loaded = False
-    expected_codes = expected_codes_for_case(case_id)
+    analysis = None
     patterns: list[dict[str, Any]] = []
     calculations: list[dict[str, Any]] = []
-    metrics: dict[str, Any] = {}
+    drc_metrics: dict[str, Any] = {}
+    route_time_ms = 0.0
+    scene_time_ms = 0.0
+    drc_time_ms = 0.0
+    render_time_ms = 0.0
+    placement_time_ms = 0.0
+    layout_loaded = False
+    render_allowed = circuit is not None
 
     if circuit is not None:
         validation_findings = CircuitValidator(lib).validate(circuit)
         diagnostics.extend(validation_findings)
         render_allowed = not has_blocking_diagnostics(diagnostics)
+        analysis = TopologyAnalyzer().analyze(circuit, lib)
         if render_allowed:
             erc_findings = ElectricalRuleChecker(lib).check(circuit)
             diagnostics.extend(erc_findings)
-            existing_layout = parse_layout_text(layout_text)
+            existing_layout = layout_override if layout_override is not None else parse_layout_text(layout_text)
             layout_loaded = existing_layout is not None
-            layout = DeterministicPlacementEngine().place(circuit, lib, existing_layout)
-            routes = ManhattanRouter().route(circuit, lib, layout)
+            placement_start = perf_counter()
+            layout = placement_engine_for_quality(quality_mode, existing_layout).place(circuit, lib, existing_layout)
+            placement_time_ms = (perf_counter() - placement_start) * 1000
+            route_start = perf_counter()
+            routes = router_for_quality(quality_mode).route(circuit, lib, layout)
+            route_time_ms = (perf_counter() - route_start) * 1000
             for route in routes:
                 for warning in route.warnings:
-                    diagnostics.append(Diagnostic(severity=Severity.WARNING, message=warning))
+                    diagnostics.append(Diagnostic(severity=Severity.WARNING, code="ROUTING_WARNING", message=warning, net_name=route.name))
+            scene_start = perf_counter()
             scene = build_schematic_scene(circuit, lib, layout, routes)
-            drc_findings, metrics = visual_drc_from_scene(scene)
+            scene_time_ms = (perf_counter() - scene_start) * 1000
+            drc_start = perf_counter()
+            drc_findings, drc_metrics = visual_drc_from_scene(scene)
+            drc_time_ms = (perf_counter() - drc_start) * 1000
             diagnostics.extend(drc_findings)
             patterns = detect_patterns(circuit, lib)
             calculations = engineering_calculations(circuit, lib)
+            render_start = perf_counter()
             svg = render_scene_svg(scene, diagnostics)
-        else:
-            scene = None
-    else:
-        scene = None
+            render_time_ms = (perf_counter() - render_start) * 1000
 
+    timing = {
+        "quality_mode": quality_mode.value,
+        "cache_hit": False,
+        "parse_time_ms": round(parse_time_ms, 3),
+        "placement_time_ms": round(placement_time_ms, 3),
+        "route_time_ms": round(route_time_ms, 3),
+        "scene_time_ms": round(scene_time_ms, 3),
+        "drc_time_ms": round(drc_time_ms, 3),
+        "svg_time_ms": round(render_time_ms, 3),
+        "total_render_time_ms": round((perf_counter() - total_start) * 1000, 3),
+    }
+    metrics = {**drc_metrics, "timing": timing, "quality_mode": quality_mode.value}
+    context = {
+        "library": lib,
+        "circuit": circuit,
+        "diagnostics": diagnostics,
+        "validation": validation_findings,
+        "erc": erc_findings,
+        "drc": drc_findings,
+        "layout": layout,
+        "routes": routes,
+        "scene": scene,
+        "svg": svg,
+        "analysis": analysis,
+        "patterns": patterns,
+        "calculations": calculations,
+        "metrics": metrics,
+        "render_allowed": render_allowed,
+        "layout_loaded": layout_loaded,
+        "quality_mode": quality_mode,
+        "cache_hit": False,
+    }
+    final_layout_text = layout.model_dump_json() if circuit is not None else effective_layout_text
+    store_key = render_cache_key(text, filename, final_layout_text, quality_mode) if final_layout_text is not None else lookup_key
+    if use_cache and store_key:
+        CURRENT_RENDER_CACHE["key"] = store_key
+        CURRENT_RENDER_CACHE["context"] = context
+    return context
+
+
+def response_from_context(
+    context: dict[str, Any],
+    filename: str,
+    source_kind: str,
+    circuit_id: str,
+    case_id: str | None,
+    expected_codes: list[str],
+) -> dict[str, Any]:
+    circuit = context.get("circuit")
+    diagnostics: list[Diagnostic] = context.get("diagnostics", [])
+    validation_findings: list[Diagnostic] = context.get("validation", [])
+    erc_findings: list[Diagnostic] = context.get("erc", [])
+    drc_findings: list[Diagnostic] = context.get("drc", [])
+    layout: Layout = context.get("layout") or Layout()
+    scene = context.get("scene")
     actual_codes = sorted({diag.code for diag in diagnostics if diag.code})
     expected_match = compare_expected_codes(expected_codes, actual_codes) if case_id else None
     success = circuit is not None and not has_blocking_diagnostics(validation_findings)
-    if update_state and success:
-        CURRENT_STATE.current_circuit_id = circuit_id
-        CURRENT_STATE.current_circuit_name = circuit.name
-        CURRENT_STATE.source_kind = source_kind
-        CURRENT_STATE.source_filename = filename
-        CURRENT_STATE.source_text = text
-        CURRENT_STATE.layout_text = layout_text
-        CURRENT_STATE.case_id = case_id
-        CURRENT_STATE.layout_dirty = False
-        CURRENT_STATE.validation_findings = [diag.model_dump(mode="json") for diag in validation_findings]
-        CURRENT_STATE.erc_findings = [diag.model_dump(mode="json") for diag in erc_findings]
-        CURRENT_STATE.drc_findings = [diag.model_dump(mode="json") for diag in drc_findings]
-        CURRENT_STATE.expected_codes = expected_codes
-        CURRENT_STATE.actual_codes = actual_codes
-        CURRENT_STATE.expected_match = expected_match
     return {
         "success": success,
         "circuit_id": circuit_id,
@@ -204,14 +306,67 @@ def render_loaded_circuit(
         "erc": [diag.model_dump(mode="json") for diag in erc_findings],
         "drc": [diag.model_dump(mode="json") for diag in drc_findings],
         "diagnostics": [diag.model_dump(mode="json") for diag in diagnostics],
-        "render_allowed": render_allowed,
-        "schematic": {"svg": svg, "layout": layout.model_dump(mode="json"), "circuit": circuit.model_dump(mode="json") if circuit else None, "scene": scene.model_dump(mode="json") if scene else None},
-        "layout_loaded": layout_loaded,
+        "render_allowed": context.get("render_allowed", False),
+        "schematic": {
+            "svg": context.get("svg", ""),
+            "layout": layout.model_dump(mode="json"),
+            "circuit": circuit.model_dump(mode="json") if circuit else None,
+            "scene": scene.model_dump(mode="json") if scene else None,
+        },
+        "layout_loaded": context.get("layout_loaded", False),
         "expected": {"codes": expected_codes, "actual_codes": actual_codes, "match": expected_match},
-        "patterns": patterns,
-        "calculations": calculations,
-        "metrics": metrics,
+        "patterns": context.get("patterns", []),
+        "calculations": context.get("calculations", []),
+        "metrics": context.get("metrics", {}),
     }
+
+
+def build_current(layout_override: Layout | None = None, use_saved_layout: bool = True, quality: RenderQualityMode | str = RenderQualityMode.INTERACTIVE) -> RenderedCircuit:
+    saved_layout = read_layout() if use_saved_layout else None
+    layout_text = saved_layout.model_dump_json() if saved_layout else None
+    context = render_pipeline(
+        EXAMPLE_NETLIST.read_text(encoding="utf-8"),
+        str(EXAMPLE_NETLIST),
+        layout_text,
+        layout_override=layout_override,
+        quality=quality,
+        use_cache=False,
+    )
+    return RenderedCircuit(svg=context["svg"], diagnostics=context["diagnostics"], layout=context["layout"], circuit=context["circuit"])
+
+
+def render_loaded_circuit(
+    text: str,
+    filename: str,
+    source_kind: str,
+    circuit_id: str,
+    case_id: str | None = None,
+    layout_text: str | None = None,
+    update_state: bool = True,
+    quality: RenderQualityMode | str = RenderQualityMode.INTERACTIVE,
+) -> dict[str, Any]:
+    expected_codes = expected_codes_for_case(case_id)
+    context = render_pipeline(text, filename, layout_text, quality=quality)
+    response = response_from_context(context, filename, source_kind, circuit_id, case_id, expected_codes)
+    success = bool(response["success"])
+    if update_state and success:
+        circuit: Circuit = context["circuit"]
+        layout: Layout = context["layout"]
+        CURRENT_STATE.current_circuit_id = circuit_id
+        CURRENT_STATE.current_circuit_name = circuit.name
+        CURRENT_STATE.source_kind = source_kind
+        CURRENT_STATE.source_filename = filename
+        CURRENT_STATE.source_text = text
+        CURRENT_STATE.layout_text = layout.model_dump_json(indent=2)
+        CURRENT_STATE.case_id = case_id
+        CURRENT_STATE.layout_dirty = False
+        CURRENT_STATE.validation_findings = response["validation"]
+        CURRENT_STATE.erc_findings = response["erc"]
+        CURRENT_STATE.drc_findings = response["drc"]
+        CURRENT_STATE.expected_codes = expected_codes
+        CURRENT_STATE.actual_codes = response["expected"]["actual_codes"]
+        CURRENT_STATE.expected_match = response["expected"]["match"]
+    return response
 
 
 def parse_layout_text(layout_text: str | None) -> Layout | None:
@@ -325,8 +480,8 @@ def render_error_svg(diagnostics: list[Diagnostic]) -> str:
     return f'<svg id="schematic" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 700"><rect width="1200" height="700" fill="#111821"/>{lines}</svg>'
 
 
-def current_scene_payload() -> dict[str, Any]:
-    context = current_render_context()
+def current_scene_payload(quality: RenderQualityMode | str = RenderQualityMode.INTERACTIVE) -> dict[str, Any]:
+    context = current_render_context(quality=quality)
     diagnostics = context["diagnostics"]
     scene = context.get("scene")
     layout = context.get("layout")
@@ -336,33 +491,23 @@ def current_scene_payload() -> dict[str, Any]:
         "diagnostics": [diag.model_dump(mode="json") for diag in diagnostics],
         "layout": layout.model_dump(mode="json") if layout else {},
         "route_count": len(routes),
+        "metrics": context.get("metrics", {}),
+        "quality_mode": normalized_quality(quality).value,
+        "cache_hit": bool(context.get("cache_hit")),
     }
 
 
-def current_render_context(layout_override: Layout | None = None) -> dict[str, Any]:
-    lib = library()
+def current_render_context(layout_override: Layout | None = None, quality: RenderQualityMode | str = RenderQualityMode.INTERACTIVE) -> dict[str, Any]:
     source_text = CURRENT_STATE.source_text or (EXAMPLE_NETLIST.read_text(encoding="utf-8") if EXAMPLE_NETLIST.exists() else "")
     source_filename = CURRENT_STATE.source_filename or str(EXAMPLE_NETLIST)
-    circuit, diagnostics = NetlistParser().parse_text(source_text, Path(source_filename))
-    if circuit is None:
-        return {"library": lib, "circuit": None, "diagnostics": diagnostics, "layout": None, "routes": [], "scene": None, "analysis": None}
-    validation = CircuitValidator(lib).validate(circuit)
-    diagnostics.extend(validation)
-    existing_layout = layout_override if layout_override is not None else parse_layout_text(CURRENT_STATE.layout_text)
-    layout = DeterministicPlacementEngine().place(circuit, lib, existing_layout)
-    routes = []
-    scene = None
-    analysis = TopologyAnalyzer().analyze(circuit, lib)
-    if not has_blocking_diagnostics(diagnostics):
-        diagnostics.extend(ElectricalRuleChecker(lib).check(circuit))
-        routes = ManhattanRouter().route(circuit, lib, layout)
-        for route in routes:
-            for warning in route.warnings:
-                diagnostics.append(Diagnostic(severity=Severity.WARNING, code="ROUTING_WARNING", message=warning, net_name=route.name))
-        scene = build_schematic_scene(circuit, lib, layout, routes)
-        drc_findings, _ = visual_drc_from_scene(scene)
-        diagnostics.extend(drc_findings)
-    return {"library": lib, "circuit": circuit, "diagnostics": diagnostics, "layout": layout, "routes": routes, "scene": scene, "analysis": analysis}
+    return render_pipeline(
+        source_text,
+        source_filename,
+        CURRENT_STATE.layout_text,
+        layout_override=layout_override,
+        quality=quality,
+        use_cache=layout_override is None,
+    )
 
 
 def component_detail_payload(ref: str, context: dict[str, Any]) -> dict[str, Any]:
@@ -508,7 +653,9 @@ def get_component(component_id: str) -> dict[str, object]:
 
 
 @app.get("/api/circuit")
-def get_circuit(fresh: bool = False) -> dict[str, object]:
+def get_circuit(fresh: bool = False, quality: RenderQualityMode = RenderQualityMode.INTERACTIVE) -> dict[str, object]:
+    if fresh:
+        invalidate_render_cache()
     if CURRENT_STATE.source_text and not fresh:
         response = render_loaded_circuit(
             CURRENT_STATE.source_text,
@@ -518,10 +665,11 @@ def get_circuit(fresh: bool = False) -> dict[str, object]:
             CURRENT_STATE.case_id,
             CURRENT_STATE.layout_text,
             update_state=False,
+            quality=quality,
         )
         schematic = response["schematic"]
         return {**schematic, "diagnostics": response["diagnostics"], "current": CURRENT_STATE.model_dump(mode="json"), "expected": response["expected"]}
-    rendered = build_current(use_saved_layout=not fresh)
+    rendered = build_current(use_saved_layout=not fresh, quality=quality)
     return {**rendered.model_dump(mode="json"), "current": CURRENT_STATE.model_dump(mode="json")}
 
 
@@ -546,6 +694,7 @@ def load_text(request: LoadTextRequest) -> dict[str, Any]:
     if not request.filename.lower().endswith(".cnet"):
         raise HTTPException(status_code=400, detail="Only .cnet files are supported")
     safe_name = Path(request.filename).name
+    invalidate_render_cache()
     return render_loaded_circuit(request.text, safe_name, "uploaded", f"uploaded_{safe_name}", layout_text=request.layout_text)
 
 
@@ -558,6 +707,7 @@ def load_case(request: LoadCaseRequest) -> dict[str, Any]:
     if not (path.is_relative_to(ROOT / "examples") or path.is_relative_to(TEST_CIRCUITS_ROOT)):
         raise HTTPException(status_code=403, detail="Circuit path is not allowed")
     text = path.read_text(encoding="utf-8")
+    invalidate_render_cache()
     return render_loaded_circuit(text, item["path"], item["kind"], item["id"], item["id"], layout_for_path(path))
 
 
@@ -569,7 +719,9 @@ def reload_current() -> dict[str, Any]:
     if item and CURRENT_STATE.source_kind != "uploaded":
         path = ROOT / item["path"]
         text = path.read_text(encoding="utf-8")
+        invalidate_render_cache()
         return render_loaded_circuit(text, item["path"], CURRENT_STATE.source_kind, item["id"], item["id"], layout_for_path(path))
+    invalidate_render_cache()
     return render_loaded_circuit(CURRENT_STATE.source_text, CURRENT_STATE.source_filename, "uploaded", CURRENT_STATE.current_circuit_id, CURRENT_STATE.case_id, CURRENT_STATE.layout_text)
 
 
@@ -590,7 +742,7 @@ def load_circuit(request: LoadRequest) -> dict[str, object]:
 
 @app.post("/api/circuit/validate")
 def validate_current() -> dict[str, object]:
-    rendered = build_current()
+    rendered = build_current(quality=RenderQualityMode.STRICT)
     return {"diagnostics": [d.model_dump() for d in rendered.diagnostics]}
 
 
@@ -612,30 +764,32 @@ def current_topology() -> dict[str, Any]:
 
 
 @app.get("/api/circuit/placement-score")
-def current_placement_score() -> dict[str, Any]:
-    payload = current_scene_payload()
+def current_placement_score(quality: RenderQualityMode = RenderQualityMode.INTERACTIVE) -> dict[str, Any]:
+    payload = current_scene_payload(quality=quality)
     layout = payload.get("layout") or {}
     canvas = layout.get("canvas", {}) if isinstance(layout, dict) else {}
     return {
         "diagnostics": payload.get("diagnostics", []),
         "placement_optimizer": canvas.get("placement_optimizer"),
         "layout_available": bool(layout),
+        "quality_mode": payload.get("quality_mode"),
+        "metrics": payload.get("metrics", {}),
     }
 
 
 @app.get("/api/circuit/scene")
-def current_scene() -> dict[str, Any]:
-    return current_scene_payload()
+def current_scene(quality: RenderQualityMode = RenderQualityMode.INTERACTIVE) -> dict[str, Any]:
+    return current_scene_payload(quality=quality)
 
 
 @app.get("/api/circuit/component-details/{ref}")
-def current_component_details(ref: str) -> dict[str, Any]:
-    return component_detail_payload(ref, current_render_context())
+def current_component_details(ref: str, quality: RenderQualityMode = RenderQualityMode.INTERACTIVE) -> dict[str, Any]:
+    return component_detail_payload(ref, current_render_context(quality=quality))
 
 
 @app.get("/api/circuit/net-details/{net_name}")
-def current_net_details(net_name: str) -> dict[str, Any]:
-    return net_detail_payload(net_name, current_render_context())
+def current_net_details(net_name: str, quality: RenderQualityMode = RenderQualityMode.INTERACTIVE) -> dict[str, Any]:
+    return net_detail_payload(net_name, current_render_context(quality=quality))
 
 
 @app.post("/api/circuit/scene/hit-test")
@@ -669,6 +823,7 @@ def current_scene_hit_test(request: HitTestRequest) -> dict[str, Any]:
 def save_layout(request: LayoutSaveRequest) -> dict[str, str]:
     CURRENT_STATE.layout_text = request.layout.model_dump_json(indent=2)
     CURRENT_STATE.layout_dirty = False
+    invalidate_render_cache()
     if CURRENT_STATE.current_circuit_id == "example_solar_led":
         write_layout(request.layout)
     return {"status": "saved"}
@@ -676,41 +831,23 @@ def save_layout(request: LayoutSaveRequest) -> dict[str, str]:
 
 @app.post("/api/layout/autoroute")
 def autoroute(request: LayoutSaveRequest | None = None) -> dict[str, object]:
-    if CURRENT_STATE.source_text:
-        response = render_loaded_circuit(
-            CURRENT_STATE.source_text,
-            CURRENT_STATE.source_filename,
-            CURRENT_STATE.source_kind,
-            CURRENT_STATE.current_circuit_id,
-            CURRENT_STATE.case_id,
-            request.layout.model_dump_json() if request and request.layout else CURRENT_STATE.layout_text,
-            update_state=False,
-        )
-        return {
-            "layout": response["schematic"]["layout"],
-            "scene": response["schematic"].get("scene"),
-            "svg": response["schematic"]["svg"],
-            "diagnostics": response["diagnostics"],
-            "schematic": response["schematic"],
-            "current": CURRENT_STATE.model_dump(mode="json"),
-            "expected": response["expected"],
-        }
-    rendered = build_current(request.layout if request else None)
-    scene_payload = None
-    svg = rendered.svg
-    if rendered.circuit:
-        lib = library()
-        routes = ManhattanRouter().route(rendered.circuit, lib, rendered.layout)
-        scene = build_schematic_scene(rendered.circuit, lib, rendered.layout, routes)
-        scene_payload = scene.model_dump(mode="json")
-        svg = render_scene_svg(scene, rendered.diagnostics)
-    schematic = {
-        "layout": rendered.layout.model_dump(mode="json"),
-        "scene": scene_payload,
-        "svg": svg,
-        "circuit": rendered.circuit.model_dump(mode="json") if rendered.circuit else None,
+    source_text = CURRENT_STATE.source_text or (EXAMPLE_NETLIST.read_text(encoding="utf-8") if EXAMPLE_NETLIST.exists() else "")
+    source_filename = CURRENT_STATE.source_filename or str(EXAMPLE_NETLIST)
+    layout_text = request.layout.model_dump_json(indent=2) if request and request.layout else CURRENT_STATE.layout_text
+    CURRENT_STATE.layout_text = layout_text
+    CURRENT_STATE.layout_dirty = True
+    context = render_pipeline(source_text, source_filename, layout_text, quality=RenderQualityMode.INTERACTIVE, use_cache=False)
+    response = response_from_context(context, source_filename, CURRENT_STATE.source_kind, CURRENT_STATE.current_circuit_id, CURRENT_STATE.case_id, CURRENT_STATE.expected_codes)
+    return {
+        "layout": response["schematic"]["layout"],
+        "scene": response["schematic"].get("scene"),
+        "svg": response["schematic"]["svg"],
+        "diagnostics": response["diagnostics"],
+        "schematic": response["schematic"],
+        "current": CURRENT_STATE.model_dump(mode="json"),
+        "expected": response["expected"],
+        "metrics": response["metrics"],
     }
-    return {"layout": schematic["layout"], "scene": scene_payload, "svg": svg, "diagnostics": [d.model_dump() for d in rendered.diagnostics], "schematic": schematic, "current": CURRENT_STATE.model_dump(mode="json")}
 
 
 @app.post("/api/layout/net-route-style")
@@ -722,14 +859,15 @@ def set_net_route_style(request: NetRouteStyleRequest) -> dict[str, object]:
     apply_net_route_style(layout, request.net_name, request.route_style)
     CURRENT_STATE.layout_text = layout.model_dump_json(indent=2)
     CURRENT_STATE.layout_dirty = True
+    invalidate_render_cache()
     return autoroute(LayoutSaveRequest(layout=layout))
 
 
 @app.get("/api/export/svg")
 def export_current_svg() -> Response:
-    rendered = build_current()
-    export_svg(rendered.svg, ROOT / "output" / "solar_led.svg")
-    return Response(rendered.svg, media_type="image/svg+xml")
+    context = current_render_context()
+    export_svg(context["svg"], ROOT / "output" / "solar_led.svg")
+    return Response(context["svg"], media_type="image/svg+xml")
 
 
 @app.get("/api/export/png")
