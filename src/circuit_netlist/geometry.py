@@ -109,3 +109,42 @@ def segments_collinear_overlap(a: Segment, b: Segment) -> bool:
     if ax1 == ax2 == bx1 == bx2:
         return max(min(ay1, ay2), min(by1, by2)) < min(max(ay1, ay2), max(by1, by2))
     return False
+
+
+def segments_intersect(a: Segment, b: Segment) -> bool:
+    a1 = (a[0], a[1])
+    a2 = (a[2], a[3])
+    b1 = (b[0], b[1])
+    b2 = (b[2], b[3])
+    o1 = _orientation(a1, a2, b1)
+    o2 = _orientation(a1, a2, b2)
+    o3 = _orientation(b1, b2, a1)
+    o4 = _orientation(b1, b2, a2)
+    if o1 != o2 and o3 != o4:
+        return True
+    return (
+        (o1 == 0 and _point_on_segment(b1, a1, a2))
+        or (o2 == 0 and _point_on_segment(b2, a1, a2))
+        or (o3 == 0 and _point_on_segment(a1, b1, b2))
+        or (o4 == 0 and _point_on_segment(a2, b1, b2))
+    )
+
+
+def segments_intersect_away_from_shared_endpoint(a: Segment, b: Segment) -> bool:
+    if segments_collinear_overlap(a, b):
+        return True
+    if not segments_intersect(a, b):
+        return False
+    shared_endpoints = {(a[0], a[1]), (a[2], a[3])} & {(b[0], b[1]), (b[2], b[3])}
+    return not shared_endpoints
+
+
+def _orientation(a: tuple[int, int], b: tuple[int, int], c: tuple[int, int]) -> int:
+    value = (b[1] - a[1]) * (c[0] - b[0]) - (b[0] - a[0]) * (c[1] - b[1])
+    if value == 0:
+        return 0
+    return 1 if value > 0 else 2
+
+
+def _point_on_segment(point: tuple[int, int], start: tuple[int, int], end: tuple[int, int]) -> bool:
+    return min(start[0], end[0]) <= point[0] <= max(start[0], end[0]) and min(start[1], end[1]) <= point[1] <= max(start[1], end[1])

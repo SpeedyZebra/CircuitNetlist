@@ -1,6 +1,6 @@
 # Circuit Quality Gate
 
-QA-1 added a project-wide circuit quality gate for every physical `.cnet` file in the repository. QA-2 extends that gate with stricter visible-geometry checks for label, stub, text, and symbol overlaps. QA-3 centralizes those checks in `src/circuit_netlist/visual_drc.py` so regression, audit, app rendering, and placement candidate validation use the same visual DRC implementation.
+QA-1 added a project-wide circuit quality gate for every physical `.cnet` file in the repository. QA-2 extends that gate with stricter visible-geometry checks for label, stub, text, and symbol overlaps. QA-3 centralizes those checks in `src/circuit_netlist/visual_drc.py` so regression, audit, app rendering, and placement candidate validation use the same visual DRC implementation. ERC-1 centralizes topology-level open/short electrical checks in `src/circuit_netlist/erc.py`. EC-1 adds rendered connectivity validation in `src/circuit_netlist/rendered_connectivity.py` so the canonical scene must electrically match the netlist.
 
 ## Clean Versus Negative
 
@@ -10,8 +10,8 @@ Clean circuits are normal examples or good regression fixtures. They must produc
 - `VALIDATION_`
 - `ERC_`
 - `DRC_`
-- `PLACEMENT_`
 - `ROUTING_`
+- `PLACEMENT_`
 - `SCENE_`
 - `EXPORT_`
 - unclassified diagnostics
@@ -59,10 +59,11 @@ The audit runner executes:
 5. Manhattan routing
 6. Canonical scene build
 7. Shared visual DRC from `src/circuit_netlist/visual_drc.py`
-8. ERC plus regression ERC checks
-9. SVG export
-10. PNG export when Pillow is available
-11. Strict diagnostic comparison
+8. Rendered connectivity validation from `src/circuit_netlist/rendered_connectivity.py`
+9. Shared ERC from `src/circuit_netlist/erc.py`
+10. SVG export
+11. PNG export when Pillow is available
+12. Strict diagnostic comparison
 
 Clean circuits pass only when all diagnostics are empty. Negative circuits pass only when the actual diagnostic code multiset exactly matches the manifest.
 
@@ -100,6 +101,7 @@ output/circuit_audit/png/<case>.png
 - expected and actual diagnostic codes
 - missing and unexpected diagnostics
 - scene and routing metrics
+- rendered-connectivity metrics
 - SVG/PNG output paths
 - runtime
 
@@ -116,7 +118,7 @@ Diagnostic normalization lives in `src/circuit_netlist/diagnostics.py`. It recor
 - source
 - subsystem
 
-Regression, audit, route-validated placement, and app/API rendering use the shared visual DRC module. Regression and audit comparison use the shared code-count comparison helpers so diagnostic namespaces are not silently ignored.
+Regression, audit, route-validated placement, and app/API rendering use the shared visual DRC module. App/API rendering, regression, audit, placement/debug paths, and tests use the shared ERC engine. App/API rendering, regression, and audit use the shared rendered-connectivity validator. Regression and audit comparison use the shared code-count comparison helpers so diagnostic namespaces are not silently ignored.
 
 ## Adding A Clean Circuit
 
@@ -143,7 +145,9 @@ The gate fails on:
 - validation warnings/errors for clean circuits
 - ERC warnings/errors for clean circuits
 - visual DRC warnings/errors for clean circuits
+- rendered connectivity warnings/errors for clean circuits
 - visible label/stub/symbol/text overlap diagnostics
+- rendered opens, shorts, missing pin contacts, dangling stubs, or wrong-net scene contacts
 - route warnings
 - placement hard violations
 - empty scenes
@@ -156,6 +160,6 @@ The gate fails on:
 
 ## Deferred Work
 
-Playwright execution remains deferred and is not required for QA-3.
+Playwright execution remains deferred and is not required for ERC-1 or EC-1.
 
-Simulation remains deferred. QA-3 does not add a DC solver, SPICE export, solar/weather simulation, or battery simulation.
+Simulation remains deferred. ERC-1 and EC-1 do not add a DC solver, SPICE export, solar/weather simulation, or battery simulation.

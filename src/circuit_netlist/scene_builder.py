@@ -59,7 +59,7 @@ def build_schematic_scene(
     context_time_ms = (perf_counter() - context_start) * 1000
     elements: list[SceneElement] = []
     route_start = perf_counter()
-    for route_index, route in enumerate(routes):
+    for route_index, route in _route_build_order(routes):
         elements.extend(_route_elements(route, route_index, context))
     route_time_ms = (perf_counter() - route_start) * 1000
     component_start = perf_counter()
@@ -142,7 +142,7 @@ def _route_elements(route: RoutedNet, route_index: int, context: Any) -> list[Sc
                     primitives=[RenderPrimitive(kind="path", style_class="label-flag", geometry={"d": label_flag_path(stub_x, stub_y, render_side)})],
                     selectable=True,
                     z_index=route_index * 100 + 18 + index,
-                    metadata={"render_style": "net_label"},
+                    metadata={"render_style": "net_label", "route_style": route.render_style, "role": "label", "connectivity_anchor": True},
                 )
             )
             for segment_index, segment in enumerate(segments):
@@ -172,7 +172,7 @@ def _route_elements(route: RoutedNet, route_index: int, context: Any) -> list[Sc
                     parent_id=route_id,
                     net_name=route.name,
                     z_index=route_index * 100 + 40 + index,
-                    metadata={"text_role": "net_label", "attachment": True},
+                    metadata={"text_role": "net_label", "attachment": True, "route_style": route.render_style, "role": "label_text"},
                 )
             )
     if route.render_style == "power_symbol":
@@ -238,7 +238,7 @@ def _route_elements(route: RoutedNet, route_index: int, context: Any) -> list[Sc
                     hit_bounds=Bounds.from_tuple(symbol_bounds).expanded(8),
                     primitives=symbol_primitives,
                     z_index=route_index * 100 + 70 + index,
-                    metadata={"attachment": True, "source_ref": str(endpoint.get("component_ref", ""))},
+                    metadata={"attachment": True, "source_ref": str(endpoint.get("component_ref", "")), "route_style": route.render_style, "role": symbol_kind, "connectivity_anchor": True},
                     selectable=True,
                 )
             )
@@ -256,7 +256,7 @@ def _route_elements(route: RoutedNet, route_index: int, context: Any) -> list[Sc
                     parent_id=route_id,
                     net_name=route.name,
                     z_index=route_index * 100 + 80 + index,
-                    metadata={"text_role": "power_label", "attachment": True},
+                    metadata={"text_role": "power_label", "attachment": True, "route_style": route.render_style, "role": "power_label"},
                 )
             )
     for index, (x, y) in enumerate(route.junctions):
@@ -274,6 +274,7 @@ def _route_elements(route: RoutedNet, route_index: int, context: Any) -> list[Sc
                 hit_bounds=bounds.expanded(6),
                 primitives=[RenderPrimitive(kind="circle", style_class="junction", geometry={"cx": x, "cy": y, "r": 4})],
                 z_index=route_index * 100 + 90 + index,
+                metadata={"route_style": route.render_style, "role": "junction", "connectivity_anchor": True},
                 selectable=True,
             )
         )
@@ -309,6 +310,10 @@ def _route_elements(route: RoutedNet, route_index: int, context: Any) -> list[Sc
         ),
         *elements,
     ]
+
+
+def _route_build_order(routes: list[RoutedNet]) -> list[tuple[int, RoutedNet]]:
+    return sorted(enumerate(routes), key=lambda item: (0 if item[1].render_style == "power_symbol" else 1, item[0]))
 
 
 def _component_elements(ref: str, definition: ComponentDefinition, placement: Placement, component_index: int) -> list[SceneElement]:
@@ -454,7 +459,7 @@ def _component_elements(ref: str, definition: ComponentDefinition, placement: Pl
                 primitives=[RenderPrimitive(kind="circle", style_class="pin-dot", geometry={"cx": pin_x, "cy": pin_y, "r": 4})],
                 z_index=component_index * 100 + 20 + pin_index,
                 selectable=True,
-                metadata={"electrical_type": pin.electrical_type.value, "side": pin.side},
+                metadata={"electrical_type": pin.electrical_type.value, "side": pin.side, "role": "pin", "connectivity_anchor": True, "anchor": {"x": pin_x, "y": pin_y}},
             )
         )
         label_x, number_y, number_anchor = pin_label_position(definition, placement, pin, "number")
@@ -523,6 +528,8 @@ def _segment_element(
         "source_ref": source_ref,
         "svg_id": svg_id,
         "orientation": line.orientation,
+        "route_style": route.render_style,
+        "role": "stub" if kind == "wire_stub" else "wire",
         **(metadata or {}),
     }
     return SceneElement(

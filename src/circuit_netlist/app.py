@@ -12,7 +12,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from .component_library import ComponentLibrary, load_component_library
-from .erc import ElectricalRuleChecker
+from .erc import ElectricalRuleChecker, can_run_electrical_rules
 from .exporters import export_png_bytes_from_scene, export_png_from_scene, export_svg
 from .hit_testing import hit_test_all
 from .models import Circuit, Diagnostic, Layout, NetRouteStyle, RenderQualityMode, RenderedCircuit, Severity
@@ -20,6 +20,7 @@ from .parser import NetlistParser
 from .placement import DeterministicPlacementEngine
 from .constraint_placement import PlacementOptimizationConfig
 from .regression import compare_diagnostic_codes, detect_patterns, engineering_calculations
+from .rendered_connectivity import validate_rendered_connectivity
 from .router import ManhattanRouter
 from .scene_builder import build_schematic_scene
 from .scene_renderer import render_scene_svg
@@ -80,6 +81,7 @@ class CurrentCircuitState(BaseModel):
     validation_findings: list[dict[str, Any]] = []
     erc_findings: list[dict[str, Any]] = []
     drc_findings: list[dict[str, Any]] = []
+    connectivity_findings: list[dict[str, Any]] = []
     expected_codes: list[str] = []
     actual_codes: list[str] = []
     expected_match: bool | None = None
@@ -221,6 +223,7 @@ def render_pipeline(
     validation_findings: list[Diagnostic] = []
     erc_findings: list[Diagnostic] = []
     drc_findings: list[Diagnostic] = []
+    connectivity_findings: list[Diagnostic] = []
     layout = Layout()
     routes = []
     scene = None
@@ -229,9 +232,11 @@ def render_pipeline(
     patterns: list[dict[str, Any]] = []
     calculations: list[dict[str, Any]] = []
     drc_metrics: dict[str, Any] = {}
+    connectivity_metrics: dict[str, Any] = {}
     route_time_ms = 0.0
     scene_time_ms = 0.0
     drc_time_ms = 0.0
+    connectivity_time_ms = 0.0
     render_time_ms = 0.0
     placement_time_ms = 0.0
     layout_loaded = False
@@ -242,9 +247,10 @@ def render_pipeline(
         diagnostics.extend(validation_findings)
         render_allowed = not has_blocking_diagnostics(diagnostics)
         analysis = TopologyAnalyzer().analyze(circuit, lib)
-        if render_allowed:
+        if can_run_electrical_rules(validation_findings):
             erc_findings = ElectricalRuleChecker(lib).check(circuit)
             diagnostics.extend(erc_findings)
+        if render_allowed:
             existing_layout = layout_override if layout_override is not None else parse_layout_text(layout_text)
             layout_loaded = existing_layout is not None
             placement_start = perf_counter()
@@ -263,6 +269,10 @@ def render_pipeline(
             drc_findings, drc_metrics = visual_drc_from_scene(scene)
             drc_time_ms = (perf_counter() - drc_start) * 1000
             diagnostics.extend(drc_findings)
+            connectivity_start = perf_counter()
+            connectivity_findings, connectivity_metrics = validate_rendered_connectivity(circuit, scene)
+            connectivity_time_ms = (perf_counter() - connectivity_start) * 1000
+            diagnostics.extend(connectivity_findings)
             patterns = detect_patterns(circuit, lib)
             calculations = engineering_calculations(circuit, lib)
             render_start = perf_counter()
@@ -277,6 +287,7 @@ def render_pipeline(
         "route_time_ms": round(route_time_ms, 3),
         "scene_time_ms": round(scene_time_ms, 3),
         "drc_time_ms": round(drc_time_ms, 3),
+        "connectivity_time_ms": round(connectivity_time_ms, 3),
         "svg_time_ms": round(render_time_ms, 3),
         "total_render_time_ms": round((perf_counter() - total_start) * 1000, 3),
     }
@@ -284,7 +295,7 @@ def render_pipeline(
         scene_timing = scene.metadata.get("timing", {})
         if isinstance(scene_timing, dict):
             timing.update(scene_timing)
-    metrics = {**drc_metrics, "timing": timing, "quality_mode": quality_mode.value}
+    metrics = {**drc_metrics, "rendered_connectivity": connectivity_metrics, "timing": timing, "quality_mode": quality_mode.value}
     context = {
         "library": lib,
         "circuit": circuit,
@@ -292,6 +303,7 @@ def render_pipeline(
         "validation": validation_findings,
         "erc": erc_findings,
         "drc": drc_findings,
+        "connectivity": connectivity_findings,
         "layout": layout,
         "routes": routes,
         "scene": scene,
@@ -328,6 +340,7 @@ def response_from_context(
     validation_findings: list[Diagnostic] = context.get("validation", [])
     erc_findings: list[Diagnostic] = context.get("erc", [])
     drc_findings: list[Diagnostic] = context.get("drc", [])
+    connectivity_findings: list[Diagnostic] = context.get("connectivity", [])
     layout: Layout = context.get("layout") or Layout()
     scene = context.get("scene")
     actual_codes = sorted({diag.code for diag in diagnostics if diag.code})
@@ -343,6 +356,7 @@ def response_from_context(
         "validation": [diag.model_dump(mode="json") for diag in validation_findings],
         "erc": [diag.model_dump(mode="json") for diag in erc_findings],
         "drc": [diag.model_dump(mode="json") for diag in drc_findings],
+        "connectivity": [diag.model_dump(mode="json") for diag in connectivity_findings],
         "diagnostics": [diag.model_dump(mode="json") for diag in diagnostics],
         "render_allowed": context.get("render_allowed", False),
         "schematic": {
@@ -401,6 +415,7 @@ def render_loaded_circuit(
         CURRENT_STATE.validation_findings = response["validation"]
         CURRENT_STATE.erc_findings = response["erc"]
         CURRENT_STATE.drc_findings = response["drc"]
+        CURRENT_STATE.connectivity_findings = response["connectivity"]
         CURRENT_STATE.expected_codes = expected_codes
         CURRENT_STATE.actual_codes = response["expected"]["actual_codes"]
         CURRENT_STATE.expected_match = response["expected"]["match"]

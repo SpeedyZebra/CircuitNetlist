@@ -69,7 +69,7 @@ def test_router_quality_factories_set_candidate_validation_modes() -> None:
     assert ManhattanRouter.for_interactive().validate_auto_route_styles is False
     assert ManhattanRouter.for_interactive().max_auto_validated_nets == 0
     assert ManhattanRouter.for_strict().validate_auto_route_styles is True
-    assert ManhattanRouter.for_strict().max_auto_validated_nets == 2
+    assert ManhattanRouter.for_strict().max_auto_validated_nets == 12
     assert ManhattanRouter.for_audit().validate_auto_route_styles is True
     assert ManhattanRouter.for_audit().max_auto_validated_nets >= ManhattanRouter.for_strict().max_auto_validated_nets
 
@@ -142,6 +142,7 @@ def test_initial_circuit_response_stores_generated_layout_without_dirty_flag() -
     prepare_default_solar_without_layout()
     response = app_module.get_circuit()
     assert response["layout"]["components"]
+    assert not [diag.get("code") for diag in response["diagnostics"] if diag.get("code")]
     assert app_module.CURRENT_STATE.layout_text
     assert app_module.CURRENT_STATE.layout_dirty is False
     assert response["current"]["layout_text"]
@@ -162,6 +163,14 @@ def test_default_solar_detail_and_scene_endpoints_reuse_no_layout_cache(monkeypa
     scene_payload = app_module.current_scene_payload()
     assert scene_payload["cache_hit"] is True
     assert scene_payload["scene"]["scene_version"] == "1.0"
+
+
+def test_default_solar_interactive_load_is_drc_clean() -> None:
+    response = app_module.load_case(LoadCaseRequest(case_id="example_solar_led"))
+    assert response["expected"]["match"] is True
+    assert not [diag.get("code") for diag in response["drc"]]
+    assert "DRC_POWER_SYMBOL_OVERLAP" not in response["expected"]["actual_codes"]
+    assert "DRC_STUB_LABEL_OVERLAP" not in response["expected"]["actual_codes"]
 
 
 def test_generated_layout_state_does_not_overwrite_user_layout() -> None:

@@ -4,8 +4,8 @@
   body: {renderer: led, width: 140, height: 100, pin_pitch: 40}
   parameters: {vf: {required: false, unit: V}, current: {required: false, unit: A}, internally_regulated: {required: false}}
   pins: &ledpins
-    - {number: "1", name: A, aliases: [ANODE], side: left, position: 1, electrical_type: passive}
-    - {number: "2", name: K, aliases: [CATHODE], side: right, position: 1, electrical_type: passive}
+    - {number: "1", name: A, aliases: [ANODE], side: left, position: 1, electrical_type: passive, intent: led_anode}
+    - {number: "2", name: K, aliases: [CATHODE], side: right, position: 1, electrical_type: passive, intent: led_cathode}
   metadata: &ledmeta
     verified_status: generic
     summary: Light-emitting diode. It conducts from anode to cathode and emits light when forward biased.
@@ -39,10 +39,10 @@
   category: Lighting
   body: {renderer: functional_block, width: 160, height: 130, pin_pitch: 30}
   pins:
-    - {number: "1", name: VDD, aliases: [VCC], side: left, position: 1, electrical_type: power_in}
-    - {number: "2", name: GND, aliases: [], side: left, position: 3, electrical_type: power_in}
-    - {number: "3", name: DIN, aliases: [], side: right, position: 1, electrical_type: input}
-    - {number: "4", name: DOUT, aliases: [], side: right, position: 3, electrical_type: output}
+    - {number: "1", name: VDD, aliases: [VCC], side: left, position: 1, electrical_type: power_in, intent: supply_positive}
+    - {number: "2", name: GND, aliases: [], side: left, position: 3, electrical_type: power_in, intent: supply_ground}
+    - {number: "3", name: DIN, aliases: [], side: right, position: 1, electrical_type: input, intent: digital_input}
+    - {number: "4", name: DOUT, aliases: [], side: right, position: 3, electrical_type: output, intent: digital_output}
   metadata:
     verified_status: generic
     summary: Addressable RGB LED block with power, ground, and serial data pins.

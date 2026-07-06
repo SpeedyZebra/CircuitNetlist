@@ -1,0 +1,12 @@
+CIRCUIT Fault_Op_Amp_Supply_Reversed
+
+COMPONENT V1 POWER_DC_SOURCE voltage=5V
+COMPONENT U1 BASIC_OP_AMP
+
+NET VCC:
+    V1.POS
+    U1.V-
+
+NET GND:
+    V1.NEG
+    U1.V+

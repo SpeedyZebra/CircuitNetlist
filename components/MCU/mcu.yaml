@@ -7,14 +7,14 @@
   description: 8-bit tinyAVR microcontroller
   body: {renderer: dip_ic, width: 160, height: 200, fill: "#f4f4f4", stroke: "#222222", notch: top, pin_pitch: 40}
   pins:
-    - {number: "1", name: VDD, aliases: [VCC], side: left, position: 1, electrical_type: power_in}
-    - {number: "2", name: PA6, aliases: [AIN6], side: left, position: 2, electrical_type: bidirectional}
-    - {number: "3", name: PA7, aliases: [AIN7], side: left, position: 3, electrical_type: bidirectional}
-    - {number: "4", name: GND, aliases: [VSS], side: left, position: 4, electrical_type: power_in}
-    - {number: "5", name: PA1, aliases: [AIN1], side: right, position: 4, electrical_type: bidirectional}
-    - {number: "6", name: PA2, aliases: [AIN2], side: right, position: 3, electrical_type: bidirectional}
-    - {number: "7", name: PA3, aliases: [AIN3], side: right, position: 2, electrical_type: bidirectional}
-    - {number: "8", name: PA0_UPDI, aliases: [PA0, UPDI], side: right, position: 1, electrical_type: bidirectional}
+    - {number: "1", name: VDD, aliases: [VCC], side: left, position: 1, electrical_type: power_in, intent: supply_positive}
+    - {number: "2", name: PA6, aliases: [AIN6], side: left, position: 2, electrical_type: bidirectional, intent: analog_input}
+    - {number: "3", name: PA7, aliases: [AIN7], side: left, position: 3, electrical_type: bidirectional, intent: analog_input}
+    - {number: "4", name: GND, aliases: [VSS], side: left, position: 4, electrical_type: power_in, intent: supply_ground}
+    - {number: "5", name: PA1, aliases: [AIN1], side: right, position: 4, electrical_type: bidirectional, intent: analog_input}
+    - {number: "6", name: PA2, aliases: [AIN2], side: right, position: 3, electrical_type: bidirectional, intent: analog_input}
+    - {number: "7", name: PA3, aliases: [AIN3], side: right, position: 2, electrical_type: bidirectional, intent: analog_input}
+    - {number: "8", name: PA0_UPDI, aliases: [PA0, UPDI], side: right, position: 1, electrical_type: bidirectional, intent: digital_input}
   metadata:
     verified_status: verified_pinout
     summary: Small 8-bit tinyAVR microcontroller. VDD and GND power the device; PA pins are GPIO.

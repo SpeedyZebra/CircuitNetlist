@@ -72,21 +72,22 @@ def stable_layout_dump(layout: Layout) -> dict[str, object]:
     }
 
 
-def run_pipeline(circuit, library: ComponentLibrary, existing: Layout | None = None):
+def run_pipeline(circuit, library: ComponentLibrary, existing: Layout | None = None, strict_routes: bool = False):
     validation = CircuitValidator(library).validate(circuit)
     assert not has_blocking_diagnostics(validation), validation
     analysis = TopologyAnalyzer().analyze(circuit, library)
     engine = DeterministicPlacementEngine()
     layout = engine.place(circuit, library, existing)
     assert stable_layout_dump(layout) == stable_layout_dump(DeterministicPlacementEngine().place(circuit, library, existing))
-    routes = ManhattanRouter(validate_auto_route_styles=False).route(circuit, library, layout)
+    router = ManhattanRouter.for_strict() if strict_routes else ManhattanRouter(validate_auto_route_styles=False)
+    routes = router.route(circuit, library, layout)
     drc, metrics = visual_drc(circuit, library, layout, routes)
     render_circuit(circuit, library, layout, routes, [*validation, *drc])
     return analysis, layout, drc, metrics, engine.last_group_envelopes
 
 
-def assert_clean(circuit, library: ComponentLibrary, existing: Layout | None = None):
-    analysis, layout, drc, metrics, envelopes = run_pipeline(circuit, library, existing)
+def assert_clean(circuit, library: ComponentLibrary, existing: Layout | None = None, strict_routes: bool = False):
+    analysis, layout, drc, metrics, envelopes = run_pipeline(circuit, library, existing, strict_routes)
     assert [diag.code for diag in drc] == []
     assert metrics["component_body_overlaps"] == 0
     assert metrics["wire_symbol_overlaps"] == 0
@@ -140,7 +141,7 @@ def test_variable_size_voltage_dividers_and_rc_filters_render_cleanly() -> None:
 def test_variable_size_decoupling_bank_and_large_controller_render_cleanly() -> None:
     circuit = parse_case("multi_decoupling_with_rc_filters.cnet")
     library = variant_library(capacitor=(260, 200), controller=(300, 260))
-    analysis, layout, _ = assert_clean(circuit, library)
+    analysis, layout, _ = assert_clean(circuit, library, strict_routes=True)
     assert len(analysis.patterns_by_type(PatternType.DECOUPLING_CAPACITOR)) == 2
     assert layout.components["C7"].x < layout.components["C54"].x
 
@@ -171,7 +172,9 @@ def test_missing_geometry_uses_fallback_bounds_in_full_pipeline() -> None:
     library = variant_library()
     resistor_definition = library.components["BASIC_RESISTOR"]
     library.components["BASIC_RESISTOR"] = resistor_definition.model_copy(update={"body": resistor_definition.body.model_copy(update={"width": 0, "height": 0})})
-    _, _, envelopes = assert_clean(circuit, library)
+    _, _, drc, metrics, envelopes = run_pipeline(circuit, library)
+    assert [diag.code for diag in drc if diag.code != "DRC_UNRELATED_WIRE_INTERSECTION"] == []
+    assert metrics["component_body_overlaps"] == 0
     low_side = [group for group in envelopes if group["pattern_type"] == "low_side_mosfet_switch"]
     assert any(group["fallback_geometry_refs"] for group in low_side)
 

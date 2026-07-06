@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from .geometry import boxes_overlap, inflate_box, segment_crosses_box, segments_collinear_overlap
+from .geometry import boxes_overlap, inflate_box, segment_crosses_box, segments_collinear_overlap, segments_intersect
 from .models import Circuit, Diagnostic, Layout, Severity
 from .scene import SchematicScene
 from .scene_builder import build_schematic_scene
@@ -108,6 +108,7 @@ def visual_drc_from_scene(scene: SchematicScene) -> tuple[list[Diagnostic], dict
         if a[1] != b[1] and boxes_overlap(a[4], b[4])
     )
     wire_overlaps = sum(1 for i, a in enumerate(wire_like) for b in wire_like[i + 1 :] if a[0] != b[0] and segments_collinear_overlap(a[3], b[3]))
+    wire_intersections = sum(1 for i, a in enumerate(wire_like) for b in wire_like[i + 1 :] if _unrelated_segments_intersect(a, b))
 
     if component_overlaps:
         diagnostics.append(Diagnostic(severity=Severity.ERROR, code="DRC_COMPONENT_OVERLAP", message=f"{component_overlaps} component body overlaps"))
@@ -125,6 +126,8 @@ def visual_drc_from_scene(scene: SchematicScene) -> tuple[list[Diagnostic], dict
         diagnostics.append(Diagnostic(severity=Severity.WARNING, code="DRC_LABEL_LABEL_OVERLAP", message=f"{label_label_overlaps} label/label overlaps"))
     if wire_overlaps:
         diagnostics.append(Diagnostic(severity=Severity.WARNING, code="DRC_WIRE_WIRE_OVERLAP", message=f"{wire_overlaps} unrelated wire overlaps"))
+    if wire_intersections:
+        diagnostics.append(Diagnostic(severity=Severity.ERROR, code="DRC_UNRELATED_WIRE_INTERSECTION", message=f"{wire_intersections} unrelated wire intersections"))
 
     total_wire_text_overlaps = physical_wire_text_overlaps + visible_wire_text_overlaps
     if total_wire_text_overlaps:
@@ -143,6 +146,7 @@ def visual_drc_from_scene(scene: SchematicScene) -> tuple[list[Diagnostic], dict
         "power_symbol_overlaps": power_symbol_overlaps,
         "label_label_overlaps": label_label_overlaps,
         "unrelated_wire_overlaps": wire_overlaps,
+        "unrelated_wire_intersections": wire_intersections,
         "total_wire_length": total_wire_length,
         "physical_wire_segments": sum(1 for _, kind, _, _, *_ in wire_like if kind == "wire"),
         "net_labels": sum(1 for element in scene.elements if element.kind == "net_label" and element.metadata.get("attachment")),
@@ -228,3 +232,11 @@ def _segment_endpoint_touches_box(segment: tuple[int, int, int, int], box: tuple
 
 def _point_in_box(point: tuple[int, int], box: tuple[float, float, float, float]) -> bool:
     return box[0] <= point[0] <= box[2] and box[1] <= point[1] <= box[3]
+
+
+def _unrelated_segments_intersect(a: WireLikeSegment, b: WireLikeSegment) -> bool:
+    if a[0] == b[0]:
+        return False
+    if segments_collinear_overlap(a[3], b[3]):
+        return False
+    return segments_intersect(a[3], b[3])

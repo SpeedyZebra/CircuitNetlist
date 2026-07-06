@@ -1,13 +1,8 @@
 from __future__ import annotations
 
-from collections import defaultdict
-
 from .component_library import ComponentLibrary
 from .models import Circuit, Diagnostic, EngineeringValue, Severity
 from .topology import is_supported_role_text
-
-
-SUPPLY_NAMES = {"VBAT", "VCC", "VDD", "VIN", "PANEL_POS", "SYS", "+5V", "+3V3"}
 
 
 class CircuitValidator:
@@ -88,33 +83,7 @@ class CircuitValidator:
                     diagnostics.append(Diagnostic(severity=Severity.ERROR, code="VALIDATION_PIN_MULTIPLE_NETS", message=f"{pinref.component_ref}.{pin.name} assigned to both {pin_assignments[key]} and {net.name}", component_ref=pinref.component_ref, pin_ref=pin.name, net_name=net.name, file=str(circuit.source_path) if circuit.source_path else None, source_file=str(circuit.source_path) if circuit.source_path else None, line=pinref.line))
                 pin_assignments[key] = net.name
 
-        net_names = {net.name for net in circuit.nets}
-        if "GND" in net_names:
-            for rail in sorted(SUPPLY_NAMES & net_names):
-                if rail == "GND":
-                    continue
-                if self._share_component_terminal(circuit, rail, "GND"):
-                    diagnostics.append(Diagnostic(severity=Severity.ERROR, code="ERC_POWER_GND_SHORT", message=f"{rail} is directly shorted to GND", net_name=rail))
-        self._check_terminal_shorts(circuit, diagnostics)
         return diagnostics
-
-    def _share_component_terminal(self, circuit: Circuit, a: str, b: str) -> bool:
-        net_map = {net.name: {(pin.component_ref, pin.resolved_number or pin.pin_name) for pin in net.pins} for net in circuit.nets}
-        return bool(net_map.get(a, set()) & net_map.get(b, set()))
-
-    def _check_terminal_shorts(self, circuit: Circuit, diagnostics: list[Diagnostic]) -> None:
-        by_ref: dict[str, dict[str, str]] = defaultdict(dict)
-        for net in circuit.nets:
-            for pin in net.pins:
-                by_ref[pin.component_ref][pin.resolved_name or pin.pin_name] = net.name
-        for component in circuit.components:
-            pins = by_ref.get(component.ref, {})
-            if component.component_id.startswith("LIGHT_LED_") and pins.get("A") and pins.get("A") == pins.get("K"):
-                diagnostics.append(Diagnostic(severity=Severity.ERROR, code="ERC_LED_TERMINALS_SHORTED", message=f"{component.ref} LED terminals are shorted together", component_ref=component.ref, net_name=pins.get("A")))
-            if component.component_id.startswith(("POWER_LIPO", "POWER_LIION")) and pins.get("POS") and pins.get("POS") == pins.get("NEG"):
-                diagnostics.append(Diagnostic(severity=Severity.ERROR, code="ERC_BATTERY_TERMINALS_SHORTED", message=f"{component.ref} battery terminals are shorted together", component_ref=component.ref, net_name=pins.get("POS")))
-            if component.component_id.startswith("POWER_SOLAR") and pins.get("POS") and pins.get("POS") == pins.get("NEG"):
-                diagnostics.append(Diagnostic(severity=Severity.ERROR, code="ERC_SOLAR_TERMINALS_SHORTED", message=f"{component.ref} solar terminals are shorted together", component_ref=component.ref, net_name=pins.get("POS")))
 
 
 def has_blocking_diagnostics(diagnostics: list[Diagnostic]) -> bool:

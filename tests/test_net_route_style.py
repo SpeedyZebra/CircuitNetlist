@@ -106,8 +106,9 @@ def test_auto_route_style_chooses_label_for_obstructed_direct_candidate() -> Non
     route = route_by_name(circuit, library, layout)["CROSS_BLOCK"]
     assert route.render_style == "net_label"
     assert route.metadata["route_style"]["selected_style"] == "label"
-    assert route.metadata["route_style"]["direct_drc_status"] == "scene_drc_failed"
+    assert route.metadata["route_style"]["direct_drc_status"] == "scene_clean"
     assert route.metadata["route_style"]["label_drc_status"] == "scene_clean"
+    assert route.metadata["route_style"]["actual_or_estimated_lengths"]["direct"] > route.metadata["route_style"]["actual_or_estimated_lengths"]["label"]
 
 
 def test_auto_route_style_chooses_power_symbol_for_global_rails() -> None:
@@ -127,8 +128,9 @@ def test_route_style_candidate_debug_metadata_is_exposed() -> None:
     assert metadata["candidate_validation"] == "scene_drc"
     assert metadata["candidates_considered"] == ["direct", "label"]
     assert set(metadata["diagnostics_by_candidate"]) == {"direct", "label"}
-    assert metadata["diagnostics_by_candidate"]["direct"]["new_visual_diagnostic_codes"]
+    assert metadata["diagnostics_by_candidate"]["direct"]["new_visual_diagnostic_codes"] == []
     assert metadata["diagnostics_by_candidate"]["label"]["new_visual_diagnostic_codes"] == []
+    assert metadata["selected_candidate"]["style"] == "label"
     assert metadata["actual_or_estimated_lengths"]["direct"] >= 0
     assert metadata["bend_counts"]["label"] == 0
 

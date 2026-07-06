@@ -23,8 +23,17 @@ NEGATIVE_CASES = load_manifest_cases(NEGATIVE_MANIFEST, "negative")
 pytestmark = [pytest.mark.audit, pytest.mark.slow]
 
 
+ROUTE_VALIDATED_CASES = {
+    "04_multi_rc_filter",
+    "04_multi_decoupling_with_rc_filters",
+    "05_relay_flyback_good",
+    "03_divider_missing_bottom",
+    "erc_battery_polarity_reversed",
+}
+
+
 def _runner(tmp_path: Path, case_id: str) -> CircuitAuditRunner:
-    return CircuitAuditRunner(tmp_path / "audit" / case_id, validate_route_styles=False)
+    return CircuitAuditRunner(tmp_path / "audit" / case_id, validate_route_styles=case_id in ROUTE_VALIDATED_CASES)
 
 
 def test_audit_manifests_inventory_all_physical_cnet_files() -> None:
@@ -63,6 +72,7 @@ def test_clean_circuit_full_pipeline_has_zero_diagnostics(case, tmp_path: Path) 
     assert result.stages["routing"] == "pass"
     assert result.stages["scene"] == "pass"
     assert result.stages["drc"] == "pass"
+    assert result.stages["rendered_connectivity"] == "pass"
     assert result.stages["erc"] == "pass"
     assert result.stages["svg_export"] == "pass"
     assert result.stages["png_export"] in {"pass", "unavailable"}
@@ -84,6 +94,7 @@ def test_negative_circuit_exact_diagnostics_only(case, tmp_path: Path) -> None:
     if case.render_allowed:
         assert result.stages["scene"] == "pass"
         assert result.stages["drc"] == "pass"
+        assert result.stages["rendered_connectivity"] in {"pass", "fail"}
         assert result.stages["svg_export"] == "pass"
 
 
@@ -135,12 +146,12 @@ def test_single_case_audit_output_path_outside_repo_has_valid_absolute_paths() -
 
 
 def test_audit_summary_reports_zero_unexpected_diagnostics(tmp_path: Path) -> None:
-    runner = CircuitAuditRunner(tmp_path / "audit", validate_route_styles=False)
+    runner = CircuitAuditRunner(tmp_path / "audit")
     results = runner.run(load_audit_cases())
     summary = audit_summary(results)
-    assert summary["total_circuits"] == 25
+    assert summary["total_circuits"] == 37
     assert summary["clean_circuits"] == 13
-    assert summary["negative_circuits"] == 12
+    assert summary["negative_circuits"] == 24
     assert summary["passed_clean_circuits"] == 13
-    assert summary["passed_negative_circuits"] == 12
+    assert summary["passed_negative_circuits"] == 24
     assert summary["unexpected_diagnostics"] == 0

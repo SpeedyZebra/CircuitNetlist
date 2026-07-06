@@ -68,8 +68,8 @@ class ManhattanRouter:
         if mode == RenderQualityMode.INTERACTIVE:
             return cls(validate_auto_route_styles=False, max_auto_validated_nets=0)
         if mode == RenderQualityMode.AUDIT:
-            return cls(validate_auto_route_styles=True, max_auto_validated_nets=4)
-        return cls(validate_auto_route_styles=True, max_auto_validated_nets=2)
+            return cls(validate_auto_route_styles=True, max_auto_validated_nets=12)
+        return cls(validate_auto_route_styles=True, max_auto_validated_nets=12)
 
     @classmethod
     def for_interactive(cls) -> "ManhattanRouter":
@@ -159,7 +159,7 @@ class ManhattanRouter:
                     direct = (pin_points[0][0][0], pin_points[0][0][1], pin_points[1][0][0], pin_points[1][0][1])
                     if (direct[0] == direct[2] or direct[1] == direct[3]) and not self._segment_crosses_obstacle(direct, body_obstacles):
                         routed.segments.append(direct)
-                        routed.segments = self._simplify_segments(routed.segments)
+                        routed.segments = self._simplify_segments(routed.segments, {point for point, _ in pin_points})
                         routes.append(routed)
                         continue
                 if net.name in POWER_NET_NAMES:
@@ -192,14 +192,10 @@ class ManhattanRouter:
                     else:
                         routed.segments.extend(self._unrouted_fallback(root, external))
                         routed.warnings.append(f"Could not find obstacle-free route for {net.name}")
-                counts = Counter()
-                for x1, y1, x2, y2 in routed.segments:
-                    counts[(x1, y1)] += 1
-                    counts[(x2, y2)] += 1
-                routed.junctions = [point for point, count in counts.items() if count >= 3]
             elif pin_points:
                 routed.warnings.append(f"Net {net.name} has only one routable pin")
-            routed.segments = self._simplify_segments(routed.segments)
+            routed.segments = self._simplify_segments(routed.segments, {point for point, _ in pin_points})
+            routed.junctions = self._junctions_from_segments(routed.segments)
             routes.append(routed)
         return routes
 
@@ -623,8 +619,8 @@ class ManhattanRouter:
             for segment in path_segments:
                 self._reserve_segment(segment, used_edges)
         routed.labels.append((min_x + 8, bus_y - 8, name))
-        routed.junctions = [(external[0], bus_y) for _, external in escaped if min_x <= external[0] <= max_x]
-        routed.segments = self._simplify_segments(routed.segments)
+        routed.segments = self._simplify_segments(routed.segments, {pin_point for pin_point, _ in pin_points})
+        routed.junctions = self._junctions_from_segments(routed.segments)
 
     def _pin_point(self, x: int, y: int, width: int, height: int, side: str, position: int, pitch: int) -> tuple[int, int]:
         offset = position * pitch
@@ -835,15 +831,35 @@ class ManhattanRouter:
             return min(x1, x2) <= px <= max(x1, x2)
         return False
 
-    def _simplify_segments(self, segments: list[tuple[int, int, int, int]]) -> list[tuple[int, int, int, int]]:
+    def _junctions_from_segments(self, segments: list[tuple[int, int, int, int]]) -> list[tuple[int, int]]:
+        candidates = {(segment[0], segment[1]) for segment in segments} | {(segment[2], segment[3]) for segment in segments}
+        candidates.update(self._segment_intersection_points(segments))
+        junctions: list[tuple[int, int]] = []
+        for point in candidates:
+            branches = 0
+            for segment in segments:
+                if not self._point_on_segment(point, segment):
+                    continue
+                endpoints = {(segment[0], segment[1]), (segment[2], segment[3])}
+                branches += 1 if point in endpoints else 2
+            if branches >= 3:
+                junctions.append(point)
+        return sorted(junctions)
+
+    def _simplify_segments(
+        self,
+        segments: list[tuple[int, int, int, int]],
+        preserved_points: set[tuple[int, int]] | None = None,
+    ) -> list[tuple[int, int, int, int]]:
         simplified: list[tuple[int, int, int, int]] = []
+        protected_points = preserved_points or set()
         for index, segment in enumerate(segments):
             if segment[0] == segment[2] and segment[1] == segment[3]:
                 continue
             if any(index != other_index and self._segment_contains(other, segment) for other_index, other in enumerate(segments)):
                 continue
             simplified.append(segment)
-        return self._trim_dangling_tails(self._merge_collinear_segments(simplified))
+        return self._trim_dangling_tails(self._merge_collinear_segments(simplified), protected_points)
 
     def _merge_collinear_segments(self, segments: list[tuple[int, int, int, int]]) -> list[tuple[int, int, int, int]]:
         changed = True
@@ -887,32 +903,38 @@ class ManhattanRouter:
                 return (min(a_min, b_min), ay1, max(a_max, b_max), ay1)
         return None
 
-    def _trim_dangling_tails(self, segments: list[tuple[int, int, int, int]]) -> list[tuple[int, int, int, int]]:
+    def _trim_dangling_tails(
+        self,
+        segments: list[tuple[int, int, int, int]],
+        preserved_points: set[tuple[int, int]] | None = None,
+    ) -> list[tuple[int, int, int, int]]:
         endpoints = [point for segment in segments for point in ((segment[0], segment[1]), (segment[2], segment[3]))]
         endpoint_counts = Counter(endpoints)
+        protected_points = preserved_points or set()
         trimmed: list[tuple[int, int, int, int]] = []
+        connection_points_by_segment = {segment: self._connection_points_on_segment(segment, segments) for segment in segments}
         for segment in segments:
             p1 = (segment[0], segment[1])
             p2 = (segment[2], segment[3])
             internal_points = sorted(
                 {
                     point
-                    for point in endpoints
+                    for point in connection_points_by_segment.get(segment, set())
                     if point not in {p1, p2} and self._point_on_segment(point, segment)
                 },
                 key=lambda point: self._manhattan(point, p1),
             )
-            if not self._point_connected_to_other_segment(p1, segment, segments, endpoint_counts) and internal_points:
+            if p1 not in protected_points and not self._point_connected_to_other_segment(p1, segment, segments, endpoint_counts) and internal_points:
                 p1 = internal_points[0]
             internal_points = sorted(
                 {
                     point
-                    for point in endpoints
+                    for point in connection_points_by_segment.get(segment, set())
                     if point not in {p1, p2} and self._point_on_segment(point, (p1[0], p1[1], p2[0], p2[1]))
                 },
                 key=lambda point: self._manhattan(point, p2),
             )
-            if not self._point_connected_to_other_segment(p2, segment, segments, endpoint_counts) and internal_points:
+            if p2 not in protected_points and not self._point_connected_to_other_segment(p2, segment, segments, endpoint_counts) and internal_points:
                 p2 = internal_points[0]
             if p1 != p2:
                 trimmed.append((p1[0], p1[1], p2[0], p2[1]))
@@ -937,6 +959,51 @@ class ManhattanRouter:
         if oy1 == oy2 == iy1 == iy2:
             return min(ox1, ox2) <= min(ix1, ix2) and max(ix1, ix2) <= max(ox1, ox2) and outer != inner
         return False
+
+    def _connection_points_on_segment(
+        self,
+        segment: tuple[int, int, int, int],
+        segments: list[tuple[int, int, int, int]],
+    ) -> set[tuple[int, int]]:
+        points: set[tuple[int, int]] = set()
+        for other in segments:
+            if other == segment:
+                continue
+            for point in ((other[0], other[1]), (other[2], other[3])):
+                if self._point_on_segment(point, segment):
+                    points.add(point)
+            intersection = self._segment_intersection_point(segment, other)
+            if intersection is not None:
+                points.add(intersection)
+        return points
+
+    def _segment_intersection_points(self, segments: list[tuple[int, int, int, int]]) -> set[tuple[int, int]]:
+        points: set[tuple[int, int]] = set()
+        for index, first in enumerate(segments):
+            for second in segments[index + 1 :]:
+                point = self._segment_intersection_point(first, second)
+                if point is not None:
+                    points.add(point)
+        return points
+
+    def _segment_intersection_point(
+        self,
+        first: tuple[int, int, int, int],
+        second: tuple[int, int, int, int],
+    ) -> tuple[int, int] | None:
+        f_horizontal = first[1] == first[3]
+        f_vertical = first[0] == first[2]
+        s_horizontal = second[1] == second[3]
+        s_vertical = second[0] == second[2]
+        if f_horizontal and s_vertical:
+            point = (second[0], first[1])
+        elif f_vertical and s_horizontal:
+            point = (first[0], second[1])
+        else:
+            return None
+        if self._point_on_segment(point, first) and self._point_on_segment(point, second):
+            return point
+        return None
 
     def _unrouted_fallback(self, start: tuple[int, int], end: tuple[int, int]) -> list[tuple[int, int, int, int]]:
         return [(start[0], start[1], end[0], end[1])]

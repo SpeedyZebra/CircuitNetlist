@@ -13,13 +13,15 @@ import yaml
 
 from .component_library import load_component_library
 from .diagnostics import compare_diagnostic_codes
-from .erc import ElectricalRuleChecker
+from .erc import can_run_electrical_rules, run_electrical_rules
 from .exporters import export_svg
 from .models import Circuit, Diagnostic, EngineeringValue, Layout, Severity
 from .parser import NetlistParser
 from .placement import DeterministicPlacementEngine
+from .rendered_connectivity import validate_rendered_connectivity
 from .renderer import render_circuit
 from .router import ManhattanRouter
+from .scene_builder import build_schematic_scene
 from .validator import CircuitValidator, has_blocking_diagnostics
 from .visual_drc import visual_drc, visual_drc_from_scene, wire_like_segments, wire_like_segments_from_scene
 
@@ -39,6 +41,7 @@ class CaseResult:
     validation: str = "fail"
     erc: str = "skip"
     drc: str = "skip"
+    connectivity: str = "skip"
     render: str = "skip"
     expected_match: bool = False
     overall: str = "fail"
@@ -121,11 +124,9 @@ class RegressionRunner:
         diagnostics.extend(validation)
         result.validation = "fail" if has_blocking_diagnostics(validation) else "pass"
 
-        if not has_blocking_diagnostics(validation):
-            erc = ElectricalRuleChecker(self.library).check(circuit)
-            erc.extend(extra_regression_checks(circuit, self.library))
-            diagnostics.extend(erc)
-            result.erc = "pass"
+        if can_run_electrical_rules(validation):
+            diagnostics.extend(run_electrical_rules(circuit, self.library))
+            result.erc = "pass" if not has_blocking_diagnostics(validation) else "partial"
         else:
             result.erc = "blocked"
 
@@ -133,10 +134,14 @@ class RegressionRunner:
         if render_allowed and circuit:
             layout = self._case_layout(case, circuit)
             routes = ManhattanRouter.for_strict().route(circuit, self.library, layout)
-            drc_diagnostics, metrics = visual_drc(circuit, self.library, layout, routes)
+            scene = build_schematic_scene(circuit, self.library, layout, routes)
+            drc_diagnostics, metrics = visual_drc_from_scene(scene)
+            connectivity_diagnostics, connectivity_metrics = validate_rendered_connectivity(circuit, scene)
             diagnostics.extend(drc_diagnostics)
-            result.metrics = metrics
+            diagnostics.extend(connectivity_diagnostics)
+            result.metrics = {**metrics, "rendered_connectivity": connectivity_metrics}
             result.drc = "pass" if not any(diag.severity in {Severity.ERROR, Severity.FATAL} for diag in drc_diagnostics) else "fail"
+            result.connectivity = "pass" if not any(diag.severity in {Severity.ERROR, Severity.FATAL} for diag in connectivity_diagnostics) else "fail"
             svg = render_circuit(circuit, self.library, layout, routes, diagnostics)
             svg_path = GENERATED_ROOT / "svg" / f"{case['id']}.svg"
             export_svg(svg, svg_path)
@@ -169,37 +174,6 @@ class RegressionRunner:
         json_path.write_text(json.dumps(result.__dict__, indent=2), encoding="utf-8")
         result.json_path = str(json_path.relative_to(SUITE_ROOT))
         return result
-
-
-def extra_regression_checks(circuit: Circuit, library: Any) -> list[Diagnostic]:
-    diagnostics: list[Diagnostic] = []
-    pin_nets = pin_name_to_net(circuit, library)
-    components = {component.ref: component for component in circuit.components}
-
-    for component in circuit.components:
-        if component.component_id == "BASIC_NMOS":
-            gate_net = pin_nets.get((component.ref, "G"))
-            if gate_net in {"VCC", "VDD", "VBAT", "VIN"}:
-                diagnostics.append(Diagnostic(severity=Severity.WARNING, code="ERC_MOSFET_GATE_TIED_TO_POWER", message=f"{component.ref} gate is tied directly to {gate_net}", component_ref=component.ref, net_name=gate_net))
-
-    divider_top = [component for component in circuit.components if role_of(component) == "divider_top"]
-    divider_bottom = [component for component in circuit.components if role_of(component) == "divider_bottom"]
-    if divider_top and not divider_bottom:
-        diagnostics.append(Diagnostic(severity=Severity.ERROR, code="ERC_DIVIDER_BOTTOM_MISSING", message="Divider top resistor exists without a divider bottom resistor", component_ref=divider_top[0].ref))
-    for top in divider_top:
-        top_nets = component_nets(circuit, top.ref)
-        for bottom in divider_bottom:
-            bottom_nets = component_nets(circuit, bottom.ref)
-            midpoint = sorted((top_nets & bottom_nets) - {"VIN", "VCC", "VDD", "VBAT", "GND"})
-            if not midpoint:
-                continue
-            midpoint_net = midpoint[0]
-            if midpoint_net in ground_connected_nets(circuit, library):
-                diagnostics.append(Diagnostic(severity=Severity.ERROR, code="ERC_DIVIDER_MIDPOINT_GROUNDED", message=f"Divider midpoint {midpoint_net} is shorted to ground", net_name=midpoint_net))
-            has_adc = any(pin.component_ref in components and components[pin.component_ref].component_id.startswith("MCU_") for net in circuit.nets if net.name == midpoint_net for pin in net.pins)
-            if not has_adc:
-                diagnostics.append(Diagnostic(severity=Severity.WARNING, code="ERC_ADC_PIN_UNCONNECTED", message=f"Divider midpoint {midpoint_net} is not connected to an MCU ADC/input pin", net_name=midpoint_net))
-    return diagnostics
 
 
 def detect_patterns(circuit: Circuit, library: Any) -> list[dict[str, Any]]:
@@ -238,32 +212,8 @@ def engineering_calculations(circuit: Circuit, library: Any) -> list[dict[str, A
     return calculations
 
 
-def pin_name_to_net(circuit: Circuit, library: Any) -> dict[tuple[str, str], str]:
-    refs = {component.ref: component.component_id for component in circuit.components}
-    result: dict[tuple[str, str], str] = {}
-    for net in circuit.nets:
-        for pinref in net.pins:
-            definition = library.get(refs.get(pinref.component_ref, ""))
-            pin = definition.resolve_pin(pinref.pin_name) if definition else None
-            if pin:
-                result[(pinref.component_ref, pin.name)] = net.name
-    return result
-
-
 def component_nets(circuit: Circuit, ref: str) -> set[str]:
     return {net.name for net in circuit.nets for pin in net.pins if pin.component_ref == ref}
-
-
-def ground_connected_nets(circuit: Circuit, library: Any) -> set[str]:
-    refs = {component.ref: component.component_id for component in circuit.components}
-    nets = {"GND"}
-    for net in circuit.nets:
-        for pinref in net.pins:
-            definition = library.get(refs.get(pinref.component_ref, ""))
-            pin = definition.resolve_pin(pinref.pin_name) if definition else None
-            if pin and pin.name in {"GND", "NEG"} and pinref.component_ref.startswith(("V", "BAT", "PANEL")):
-                nets.add(net.name)
-    return nets
 
 
 def role_of(component: Any) -> str:

@@ -1,0 +1,12 @@
+CIRCUIT Fault_Battery_Polarity_Reversed
+
+COMPONENT B1 POWER_LIPO_1S capacity=1000mAh
+COMPONENT R1 BASIC_RESISTOR value=1kohm
+
+NET GND:
+    B1.POS
+    R1.1
+
+NET VBAT:
+    B1.NEG
+    R1.2

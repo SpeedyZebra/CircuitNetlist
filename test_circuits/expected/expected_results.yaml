@@ -76,14 +76,14 @@ circuits:
     render_allowed: true
   faults/01_led_resistor/led_terminals_shorted.cnet:
     parse: pass
-    validation: fail
+    validation: pass
     expected_codes: [ERC_LED_TERMINALS_SHORTED]
     allowed_codes: [ERC_LED_NO_CURRENT_LIMIT]
     render_allowed: true
   faults/01_led_resistor/power_ground_short.cnet:
     parse: pass
     validation: fail
-    expected_codes: [VALIDATION_PIN_MULTIPLE_NETS, ERC_POWER_GND_SHORT]
+    expected_codes: [VALIDATION_PIN_MULTIPLE_NETS, ERC_POWER_GND_SHORT, ERC_SUPPLY_NET_CONFLICT, ERC_POSITIVE_TERMINAL_ON_GROUND, ERC_NEGATIVE_TERMINAL_ON_POSITIVE_RAIL]
     render_allowed: false
   faults/01_led_resistor/invalid_pin.cnet:
     parse: pass

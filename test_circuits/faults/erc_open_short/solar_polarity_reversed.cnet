@@ -1,0 +1,12 @@
+CIRCUIT Fault_Solar_Polarity_Reversed
+
+COMPONENT P1 POWER_SOLAR_PANEL_5V_2W
+COMPONENT R1 BASIC_RESISTOR value=1kohm
+
+NET GND:
+    P1.POS
+    R1.1
+
+NET PANEL_POS:
+    P1.NEG
+    R1.2

@@ -1,0 +1,7 @@
+CIRCUIT Fault_DC_Source_Terminals_Shorted
+
+COMPONENT V1 POWER_DC_SOURCE voltage=5V
+
+NET SHORT:
+    V1.POS
+    V1.NEG

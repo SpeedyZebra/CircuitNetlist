@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 from circuit_netlist import app as app_module
-from circuit_netlist import circuit_audit, constraint_placement, regression, visual_drc
+from circuit_netlist import circuit_audit, constraint_placement, regression, rendered_connectivity, visual_drc
 from circuit_netlist.component_library import load_component_library
 from circuit_netlist.models import Circuit, ComponentInstance, Diagnostic, Layout, Net, PinRef, Placement, Severity
 from circuit_netlist.topology import TopologyAnalyzer
@@ -34,6 +34,12 @@ def test_visual_drc_shared_module_is_single_production_entrypoint() -> None:
     assert circuit_audit.visual_drc_from_scene is visual_drc.visual_drc_from_scene
     assert constraint_placement.visual_drc_from_scene is visual_drc.visual_drc_from_scene
     assert app_module.visual_drc_from_scene is visual_drc.visual_drc_from_scene
+
+
+def test_rendered_connectivity_shared_module_is_single_production_entrypoint() -> None:
+    assert app_module.validate_rendered_connectivity is rendered_connectivity.validate_rendered_connectivity
+    assert circuit_audit.validate_rendered_connectivity is rendered_connectivity.validate_rendered_connectivity
+    assert regression.validate_rendered_connectivity is rendered_connectivity.validate_rendered_connectivity
 
 
 def test_constraint_optimizer_has_no_local_visual_drc_copy() -> None:

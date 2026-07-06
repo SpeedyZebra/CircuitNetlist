@@ -27,7 +27,7 @@ circuits:
     path: test_circuits/faults/01_led_resistor/power_ground_short.cnet
     topology_family: LED resistor
     purpose: VCC and GND are intentionally shorted by pin assignment.
-    expected_diagnostics: [ERC_POWER_GND_SHORT, VALIDATION_PIN_MULTIPLE_NETS]
+    expected_diagnostics: [VALIDATION_PIN_MULTIPLE_NETS, ERC_POWER_GND_SHORT, ERC_SUPPLY_NET_CONFLICT, ERC_POSITIVE_TERMINAL_ON_GROUND, ERC_NEGATIVE_TERMINAL_ON_POSITIVE_RAIL]
     render_allowed: false
   - id: 01_led_invalid_pin
     name: Invalid LED Pin
@@ -84,4 +84,88 @@ circuits:
     topology_family: voltage divider
     purpose: Divider intentionally lacks the bottom resistor.
     expected_diagnostics: [ERC_DIVIDER_BOTTOM_MISSING]
+    render_allowed: true
+  - id: erc_dc_source_terminals_shorted
+    name: DC Source Terminals Shorted
+    path: test_circuits/faults/erc_open_short/dc_source_terminals_shorted.cnet
+    topology_family: ERC open/short
+    purpose: DC source positive and negative terminals are intentionally tied together.
+    expected_diagnostics: [ERC_SOURCE_TERMINALS_SHORTED, ERC_POWER_GND_SHORT, ERC_SUPPLY_NET_CONFLICT, ERC_POSITIVE_TERMINAL_ON_GROUND, ERC_NEGATIVE_TERMINAL_ON_POSITIVE_RAIL]
+    render_allowed: true
+  - id: erc_mcu_power_reversed
+    name: MCU Power Reversed
+    path: test_circuits/faults/erc_open_short/mcu_power_reversed.cnet
+    topology_family: ERC open/short
+    purpose: MCU VDD and GND are intentionally swapped.
+    expected_diagnostics: [ERC_GROUND_PIN_ON_POSITIVE_RAIL, ERC_POSITIVE_SUPPLY_PIN_ON_GROUND, ERC_POSITIVE_TERMINAL_ON_GROUND, ERC_NEGATIVE_TERMINAL_ON_POSITIVE_RAIL, ERC_POWER_GND_SHORT, ERC_POWER_GND_SHORT, ERC_SUPPLY_NET_CONFLICT, ERC_SUPPLY_NET_CONFLICT, ERC_POWER_INPUT_NO_SOURCE]
+    render_allowed: true
+  - id: erc_battery_polarity_reversed
+    name: Battery Polarity Reversed
+    path: test_circuits/faults/erc_open_short/battery_polarity_reversed.cnet
+    topology_family: ERC open/short
+    purpose: Battery positive is on ground and negative is on VBAT.
+    expected_diagnostics: [ERC_POSITIVE_TERMINAL_ON_GROUND, ERC_NEGATIVE_TERMINAL_ON_POSITIVE_RAIL, ERC_POWER_GND_SHORT, ERC_POWER_GND_SHORT, ERC_SUPPLY_NET_CONFLICT, ERC_SUPPLY_NET_CONFLICT]
+    render_allowed: true
+  - id: erc_solar_polarity_reversed
+    name: Solar Polarity Reversed
+    path: test_circuits/faults/erc_open_short/solar_polarity_reversed.cnet
+    topology_family: ERC open/short
+    purpose: Solar panel positive is on ground and negative is on PANEL_POS.
+    expected_diagnostics: [ERC_POSITIVE_TERMINAL_ON_GROUND, ERC_NEGATIVE_TERMINAL_ON_POSITIVE_RAIL, ERC_POWER_GND_SHORT, ERC_POWER_GND_SHORT, ERC_SUPPLY_NET_CONFLICT, ERC_SUPPLY_NET_CONFLICT]
+    render_allowed: true
+  - id: erc_555_power_reversed
+    name: 555 Power Reversed
+    path: test_circuits/faults/erc_open_short/555_power_reversed.cnet
+    topology_family: ERC open/short
+    purpose: 555 VCC and GND are intentionally swapped.
+    expected_diagnostics: [ERC_GROUND_PIN_ON_POSITIVE_RAIL, ERC_POSITIVE_SUPPLY_PIN_ON_GROUND, ERC_POSITIVE_TERMINAL_ON_GROUND, ERC_NEGATIVE_TERMINAL_ON_POSITIVE_RAIL, ERC_POWER_GND_SHORT, ERC_POWER_GND_SHORT, ERC_SUPPLY_NET_CONFLICT, ERC_SUPPLY_NET_CONFLICT, ERC_POWER_INPUT_NO_SOURCE, ERC_CONTROL_PIN_FLOATING, ERC_CONTROL_PIN_FLOATING]
+    render_allowed: true
+  - id: erc_op_amp_supply_reversed
+    name: Op Amp Supply Reversed
+    path: test_circuits/faults/erc_open_short/op_amp_supply_reversed.cnet
+    topology_family: ERC open/short
+    purpose: Op amp positive and negative supply pins are intentionally swapped.
+    expected_diagnostics: [ERC_POSITIVE_SUPPLY_PIN_ON_GROUND, ERC_POSITIVE_TERMINAL_ON_GROUND, ERC_NEGATIVE_TERMINAL_ON_POSITIVE_RAIL, ERC_SUPPLY_POLARITY_REVERSED, ERC_POWER_GND_SHORT, ERC_POWER_GND_SHORT, ERC_SUPPLY_NET_CONFLICT, ERC_SUPPLY_NET_CONFLICT, ERC_POWER_INPUT_NO_SOURCE]
+    render_allowed: true
+  - id: erc_mcu_vdd_missing
+    name: MCU VDD Missing
+    path: test_circuits/faults/erc_open_short/mcu_vdd_missing.cnet
+    topology_family: ERC open/short
+    purpose: MCU positive supply pin is intentionally left unconnected.
+    expected_diagnostics: [ERC_REQUIRED_PIN_UNCONNECTED]
+    render_allowed: true
+  - id: erc_mcu_gnd_missing
+    name: MCU GND Missing
+    path: test_circuits/faults/erc_open_short/mcu_gnd_missing.cnet
+    topology_family: ERC open/short
+    purpose: MCU ground pin is intentionally left unconnected.
+    expected_diagnostics: [ERC_REQUIRED_PIN_UNCONNECTED]
+    render_allowed: true
+  - id: erc_power_input_no_source
+    name: Power Input With No Source
+    path: test_circuits/faults/erc_open_short/power_input_no_source.cnet
+    topology_family: ERC open/short
+    purpose: MCU VDD is connected to a named rail with no source.
+    expected_diagnostics: [ERC_POWER_INPUT_NO_SOURCE]
+    render_allowed: true
+  - id: erc_control_pin_floating
+    name: Control Pin Floating
+    path: test_circuits/faults/erc_open_short/control_pin_floating.cnet
+    topology_family: ERC open/short
+    purpose: 555 RESET control pin is intentionally left floating.
+    expected_diagnostics: [ERC_CONTROL_PIN_FLOATING]
+    render_allowed: true
+  - id: erc_polarized_capacitor_shorted
+    name: Polarized Capacitor Shorted
+    path: test_circuits/faults/erc_open_short/polarized_capacitor_shorted.cnet
+    topology_family: ERC open/short
+    purpose: Polarized capacitor positive and negative terminals are intentionally tied together.
+    expected_diagnostics: [ERC_CAPACITOR_TERMINALS_SHORTED, ERC_SUPPLY_TERMINALS_SHORTED, ERC_POWER_GND_SHORT, ERC_SUPPLY_NET_CONFLICT, ERC_POSITIVE_SUPPLY_PIN_ON_GROUND, ERC_GROUND_PIN_ON_POSITIVE_RAIL]
+    render_allowed: true
+  - id: erc_diode_terminals_shorted
+    name: Diode Terminals Shorted
+    path: test_circuits/faults/erc_open_short/diode_terminals_shorted.cnet
+    topology_family: ERC open/short
+    purpose: Diode anode and cathode are intentionally tied together.
+    expected_diagnostics: [ERC_DIODE_TERMINALS_SHORTED]
     render_allowed: true

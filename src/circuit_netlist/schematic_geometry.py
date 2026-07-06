@@ -12,6 +12,7 @@ from .geometry import (
     local_pin_anchor,
     segment_crosses_box,
     segments_collinear_overlap,
+    segments_intersect_away_from_shared_endpoint,
     symbol_box,
     visual_pin_side,
 )
@@ -234,7 +235,7 @@ class LabelPlacementContext:
         return any(segment_crosses_box(segment, body) for body in candidates)
 
     def segment_collides_with_wire(self, segment: Segment) -> bool:
-        return any(segments_collinear_overlap(segment, other) for other in self.segments_near_box(segment_box(segment, 1)))
+        return any(segments_intersect_away_from_shared_endpoint(segment, other) for other in self.segments_near_box(segment_box(segment, 1)))
 
     def segment_collides_with_text(self, segment: Segment) -> bool:
         candidates = self.text_boxes_near(segment_box(segment, 1))
@@ -257,6 +258,11 @@ class LabelPlacementContext:
         padded = inflate_box(box, MIN_SYMBOL_TO_TEXT_GAP)
         candidates = self._count_checks(self.pin_escape_index.query(padded))
         return any(key != source_key and boxes_overlap(padded, escape_box) for key, escape_box in candidates)
+
+    def segment_collides_with_other_pin_escape(self, segment: Segment, source_key: tuple[int, int, str]) -> bool:
+        padded = segment_box(segment, 1)
+        candidates = self._count_checks(self.pin_escape_index.query(padded))
+        return any(key != source_key and segment_crosses_box(segment, escape_box) for key, escape_box in candidates)
 
 
 def component_label_positions(definition: ComponentDefinition, placement: Placement) -> tuple[int, int, str, int, int, str]:
@@ -313,9 +319,9 @@ def choose_ground_symbol_attachment(x: int, y: int, side: str, context: LabelPla
 def choose_power_attachment(net_name: str, x: int, y: int, side: str, context: LabelPlacementContext | None, kind: str) -> tuple[list[Segment], int, int]:
     best: tuple[int, list[Segment], int, int] | None = None
     if context and context.interactive:
-        escape_distances = [POWER_PIN_ESCAPE_DISTANCE, 88, 120]
-        vertical_offsets = [POWER_SYMBOL_VERTICAL_OFFSET, 56, 84, 120]
-        lateral_offsets = [0, 32, -32, 64, -64, 96, -96]
+        escape_distances = [POWER_PIN_ESCAPE_DISTANCE, 72, 88, 120]
+        vertical_offsets = [POWER_SYMBOL_VERTICAL_OFFSET, 56, 76, 96, 120]
+        lateral_offsets = [0, 24, -24, 48, -48, 72, -72, 96, -96]
     else:
         escape_distances = [POWER_PIN_ESCAPE_DISTANCE, 72, 88, 104, 128, 152]
         vertical_offsets = [POWER_SYMBOL_VERTICAL_OFFSET, 56, 76, 96, 120, 150, 190, 240]
@@ -417,6 +423,7 @@ def attachment_collision_count(
     for segment in segments:
         count += 100 * int(context.segment_collides_with_body(segment))
         count += 100 * int(context.segment_collides_with_symbol_clearance(segment))
+        count += 75 * int(context.segment_collides_with_other_pin_escape(segment, source_key))
         count += 25 * int(context.segment_collides_with_text(segment))
         count += 25 * int(context.segment_collides_with_attachment(segment))
         count += 25 * int(context.segment_collides_with_wire(segment))
@@ -481,7 +488,7 @@ def choose_net_label_position(
                 segments = segments_from_points([(x, y), (escape_x, escape_y), (stub_x, stub_y)])
                 box = text_box(net_name, text_x, text_y, anchor)
                 flag_box = label_flag_box(stub_x, stub_y, render_side)
-                collision_count = label_collision_count(segments, box, flag_box, context)
+                collision_count = label_collision_count(segments, box, flag_box, context, (x, y, preferred_side))
                 length = sum(abs(x1 - x2) + abs(y1 - y2) for x1, y1, x2, y2 in segments)
                 bends = max(0, len(segments) - 1)
                 preferred_penalty = 0 if render_side == preferred_side else 40
@@ -495,13 +502,14 @@ def choose_net_label_position(
     return best[1], best[2], best[3], best[4], best[5], best[6], best[7]
 
 
-def label_collision_count(segments: list[Segment], box: Box, flag_box: Box, context: LabelPlacementContext | None) -> int:
+def label_collision_count(segments: list[Segment], box: Box, flag_box: Box, context: LabelPlacementContext | None, source_key: tuple[int, int, str]) -> int:
     if context is None:
         return 0
     count = int(context.collides(box)) + int(context.collides(flag_box))
     for segment in segments:
         count += 100 * int(context.segment_collides_with_body(segment))
         count += 100 * int(context.segment_collides_with_symbol_clearance(segment))
+        count += 75 * int(context.segment_collides_with_other_pin_escape(segment, source_key))
         count += 25 * int(context.segment_collides_with_wire(segment))
         count += 25 * int(context.segment_collides_with_text(segment))
         count += 25 * int(context.segment_collides_with_attachment(segment))

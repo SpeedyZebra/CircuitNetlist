@@ -5,8 +5,8 @@
   body: {renderer: dc_source, width: 100, height: 120, pin_pitch: 50}
   parameters: {voltage: {required: true, unit: V}, role: {required: false}}
   pins:
-    - {number: "1", name: POS, aliases: [PLUS, +, VOUT], side: top, position: 1, electrical_type: power_out}
-    - {number: "2", name: NEG, aliases: [MINUS, -, GND], side: bottom, position: 1, electrical_type: passive}
+    - {number: "1", name: POS, aliases: [PLUS, +, VOUT], side: top, position: 1, electrical_type: power_out, intent: source_positive}
+    - {number: "2", name: NEG, aliases: [MINUS, -, GND], side: bottom, position: 1, electrical_type: passive, intent: source_negative}
   metadata:
     verified_status: generic
     functional_symbol: true
@@ -21,8 +21,8 @@
   description: Generic photovoltaic source
   body: {renderer: solar_panel, width: 150, height: 90, pin_pitch: 45}
   pins:
-    - {number: "1", name: POS, aliases: [PLUS, +], side: right, position: 1, electrical_type: power_out}
-    - {number: "2", name: NEG, aliases: [MINUS, -], side: right, position: 2, electrical_type: passive}
+    - {number: "1", name: POS, aliases: [PLUS, +], side: right, position: 1, electrical_type: power_out, intent: solar_positive}
+    - {number: "2", name: NEG, aliases: [MINUS, -], side: right, position: 2, electrical_type: passive, intent: solar_negative}
   metadata:
     verified_status: generic
     rated_voltage_v: null
@@ -37,8 +37,8 @@
   category: Power_Supply
   body: {renderer: solar_panel, width: 150, height: 90, pin_pitch: 45}
   pins:
-    - {number: "1", name: POS, aliases: [PLUS, +], side: right, position: 1, electrical_type: power_out}
-    - {number: "2", name: NEG, aliases: [MINUS, -], side: right, position: 2, electrical_type: passive}
+    - {number: "1", name: POS, aliases: [PLUS, +], side: right, position: 1, electrical_type: power_out, intent: solar_positive}
+    - {number: "2", name: NEG, aliases: [MINUS, -], side: right, position: 2, electrical_type: passive, intent: solar_negative}
   metadata:
     verified_status: generic
     rated_voltage_v: 5.0
@@ -53,8 +53,8 @@
   category: Power_Supply
   body: {renderer: solar_panel, width: 150, height: 90, pin_pitch: 45}
   pins:
-    - {number: "1", name: POS, aliases: [PLUS, +], side: right, position: 1, electrical_type: power_out}
-    - {number: "2", name: NEG, aliases: [MINUS, -], side: right, position: 2, electrical_type: passive}
+    - {number: "1", name: POS, aliases: [PLUS, +], side: right, position: 1, electrical_type: power_out, intent: solar_positive}
+    - {number: "2", name: NEG, aliases: [MINUS, -], side: right, position: 2, electrical_type: passive, intent: solar_negative}
   metadata:
     verified_status: generic
     rated_voltage_v: 5.0
@@ -68,8 +68,8 @@
   body: {renderer: battery, width: 130, height: 90, pin_pitch: 45}
   parameters: {capacity: {required: true, unit: mAh}}
   pins:
-    - {number: "1", name: POS, aliases: [PLUS, +], side: right, position: 1, electrical_type: power_out}
-    - {number: "2", name: NEG, aliases: [MINUS, -], side: right, position: 2, electrical_type: passive}
+    - {number: "1", name: POS, aliases: [PLUS, +], side: right, position: 1, electrical_type: power_out, intent: battery_positive}
+    - {number: "2", name: NEG, aliases: [MINUS, -], side: right, position: 2, electrical_type: passive, intent: battery_negative}
   metadata:
     verified_status: generic
     nominal_voltage_v: 3.7
@@ -86,8 +86,8 @@
   body: {renderer: battery, width: 130, height: 90, pin_pitch: 45}
   parameters: {capacity: {required: true, unit: mAh}}
   pins:
-    - {number: "1", name: POS, aliases: [PLUS, +], side: right, position: 1, electrical_type: power_out}
-    - {number: "2", name: NEG, aliases: [MINUS, -], side: right, position: 2, electrical_type: passive}
+    - {number: "1", name: POS, aliases: [PLUS, +], side: right, position: 1, electrical_type: power_out, intent: battery_positive}
+    - {number: "2", name: NEG, aliases: [MINUS, -], side: right, position: 2, electrical_type: passive, intent: battery_negative}
   metadata:
     verified_status: generic
     nominal_voltage_v: 3.6
@@ -104,13 +104,13 @@
   description: Functional charger symbol, not physical IC pinout.
   body: {renderer: functional_block, width: 190, height: 260, pin_pitch: 32}
   pins:
-    - {number: "1", name: VIN, aliases: [], side: left, position: 1, electrical_type: power_in}
-    - {number: "2", name: GND, aliases: [], side: left, position: 6, electrical_type: power_in}
-    - {number: "3", name: BAT, aliases: [], side: right, position: 1, electrical_type: bidirectional}
-    - {number: "4", name: SYS, aliases: [], side: right, position: 2, electrical_type: power_out}
-    - {number: "5", name: TS, aliases: [], side: left, position: 3, electrical_type: input, required: false}
-    - {number: "6", name: STAT, aliases: [], side: right, position: 4, electrical_type: open_drain, required: false}
-    - {number: "7", name: CE, aliases: [], side: left, position: 4, electrical_type: input, required: false}
+    - {number: "1", name: VIN, aliases: [], side: left, position: 1, electrical_type: power_in, intent: charger_input}
+    - {number: "2", name: GND, aliases: [], side: left, position: 6, electrical_type: power_in, intent: supply_ground}
+    - {number: "3", name: BAT, aliases: [], side: right, position: 1, electrical_type: bidirectional, intent: charger_battery}
+    - {number: "4", name: SYS, aliases: [], side: right, position: 2, electrical_type: power_out, intent: regulator_output, required: false}
+    - {number: "5", name: TS, aliases: [], side: left, position: 3, electrical_type: input, intent: analog_input, required: false}
+    - {number: "6", name: STAT, aliases: [], side: right, position: 4, electrical_type: open_drain, intent: open_drain_output, required: false}
+    - {number: "7", name: CE, aliases: [], side: left, position: 4, electrical_type: input, intent: control_pin, required: false}
   metadata:
     verified_status: functional_block
     functional_symbol: true

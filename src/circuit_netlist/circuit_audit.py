@@ -14,12 +14,12 @@ import yaml
 
 from .component_library import ComponentLibrary, load_component_library
 from .diagnostics import compare_expected_diagnostics, diagnostic_codes, diagnostic_subsystem, normalize_diagnostics
-from .erc import ElectricalRuleChecker
+from .erc import can_run_electrical_rules, run_electrical_rules
 from .exporters import export_png_from_scene, export_svg_from_scene
 from .models import Circuit, Diagnostic, Layout, RenderQualityMode, RoutedNet, Severity
 from .parser import NetlistParser
 from .placement import DeterministicPlacementEngine
-from .regression import extra_regression_checks
+from .rendered_connectivity import validate_rendered_connectivity
 from .router import ManhattanRouter
 from .scene import SchematicScene
 from .scene_builder import build_schematic_scene
@@ -150,17 +150,25 @@ class CircuitAuditRunner:
                     scene = self._build_scene(circuit, layout, routes, result, diagnostics)
                     if scene is not None:
                         _run_stage("drc", result, diagnostics, lambda: visual_drc_from_scene(scene)[0])
-                    if validation_blocked:
-                        result.stages["erc"] = "blocked_expected"
+                        _run_rendered_connectivity_stage(circuit, scene, result, diagnostics)
+                    if can_run_electrical_rules(validation):
+                        _run_stage("erc", result, diagnostics, lambda: run_electrical_rules(circuit, self.library))
+                        if validation_blocked:
+                            result.stages["erc"] = "partial_expected"
                     else:
-                        _run_stage("erc", result, diagnostics, lambda: [*ElectricalRuleChecker(self.library).check(circuit), *extra_regression_checks(circuit, self.library)])
+                        result.stages["erc"] = "blocked_expected" if validation_blocked else "blocked"
             else:
                 result.stages["topology"] = "blocked"
                 result.stages["placement"] = "blocked"
                 result.stages["routing"] = "blocked"
                 result.stages["scene"] = "blocked"
                 result.stages["drc"] = "blocked"
-                result.stages["erc"] = "blocked"
+                result.stages["rendered_connectivity"] = "blocked"
+                if can_run_electrical_rules(validation):
+                    _run_stage("erc", result, diagnostics, lambda: run_electrical_rules(circuit, self.library))
+                    result.stages["erc"] = "partial_expected"
+                else:
+                    result.stages["erc"] = "blocked"
 
         if scene is not None and case.render_allowed:
             self._export(scene, result, diagnostics)
@@ -267,7 +275,7 @@ class CircuitAuditRunner:
         result.expected_match = comparison.matched
         result.metrics.update(_case_metrics(diagnostics, scene, routes))
         required_stages = _required_stages(case)
-        stages_ok = all(result.stages.get(stage) in {"pass", "unavailable", "blocked_expected"} for stage in required_stages)
+        stages_ok = all(result.stages.get(stage) in {"pass", "unavailable", "blocked_expected", "partial_expected"} for stage in required_stages)
         if case.classification == "clean":
             stages_ok = stages_ok and result.stages.get("png_export") in {"pass", "unavailable"}
         result.overall = "pass" if result.expected_match and stages_ok else "fail"
@@ -300,6 +308,17 @@ def _run_stage(stage: str, result: AuditResult, diagnostics: list[Diagnostic], c
         diagnostics.append(_exception_diagnostic(f"{stage.upper()}_EXCEPTION", f"{stage.title()} crashed", exc))
         result.stages[stage] = "fail"
         return []
+
+
+def _run_rendered_connectivity_stage(circuit: Circuit, scene: SchematicScene, result: AuditResult, diagnostics: list[Diagnostic]) -> None:
+    try:
+        connectivity_diagnostics, connectivity_metrics = validate_rendered_connectivity(circuit, scene)
+        diagnostics.extend(connectivity_diagnostics)
+        result.metrics["rendered_connectivity"] = connectivity_metrics
+        result.stages["rendered_connectivity"] = "pass" if not any(diag.severity in {Severity.ERROR, Severity.FATAL} for diag in connectivity_diagnostics) else "fail"
+    except Exception as exc:
+        diagnostics.append(_exception_diagnostic("RENDERED_CONNECTIVITY_EXCEPTION", "Rendered connectivity crashed", exc))
+        result.stages["rendered_connectivity"] = "fail"
 
 
 def _placement_metadata_diagnostics(layout: Layout, diagnostics: list[Diagnostic]) -> None:
@@ -370,7 +389,7 @@ def _display_path(path: Path) -> str:
 def _required_stages(case: AuditCase) -> list[str]:
     if not case.render_allowed:
         return ["parse", "validation"]
-    return ["parse", "validation", "topology", "placement", "routing", "scene", "drc", "erc", "svg_export", "png_export"]
+    return ["parse", "validation", "topology", "placement", "routing", "scene", "drc", "rendered_connectivity", "erc", "svg_export", "png_export"]
 
 
 def _case_metrics(diagnostics: list[Diagnostic], scene: SchematicScene | None, routes: list[RoutedNet]) -> dict[str, Any]:

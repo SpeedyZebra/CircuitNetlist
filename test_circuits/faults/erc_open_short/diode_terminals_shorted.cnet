@@ -1,0 +1,9 @@
+CIRCUIT Fault_Diode_Terminals_Shorted
+
+COMPONENT D1 BASIC_DIODE
+COMPONENT R1 BASIC_RESISTOR value=1kohm
+
+NET SHORT:
+    D1.A
+    D1.K
+    R1.1

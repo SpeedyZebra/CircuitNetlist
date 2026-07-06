@@ -21,6 +21,40 @@ class ElectricalType(str, Enum):
     no_connect = "no_connect"
 
 
+class PinIntent(str, Enum):
+    supply_positive = "supply_positive"
+    supply_ground = "supply_ground"
+    source_positive = "source_positive"
+    source_negative = "source_negative"
+    battery_positive = "battery_positive"
+    battery_negative = "battery_negative"
+    solar_positive = "solar_positive"
+    solar_negative = "solar_negative"
+    charger_input = "charger_input"
+    charger_battery = "charger_battery"
+    regulator_input = "regulator_input"
+    regulator_output = "regulator_output"
+    analog_input = "analog_input"
+    digital_input = "digital_input"
+    digital_output = "digital_output"
+    open_drain_output = "open_drain_output"
+    mosfet_gate = "mosfet_gate"
+    mosfet_drain = "mosfet_drain"
+    mosfet_source = "mosfet_source"
+    diode_anode = "diode_anode"
+    diode_cathode = "diode_cathode"
+    led_anode = "led_anode"
+    led_cathode = "led_cathode"
+    op_amp_positive_supply = "op_amp_positive_supply"
+    op_amp_negative_supply = "op_amp_negative_supply"
+    op_amp_input = "op_amp_input"
+    op_amp_output = "op_amp_output"
+    timing_pin = "timing_pin"
+    reset_pin = "reset_pin"
+    control_pin = "control_pin"
+    no_connect = "no_connect"
+
+
 class Severity(str, Enum):
     INFO = "INFO"
     WARNING = "WARNING"
@@ -75,6 +109,7 @@ class PinDefinition(BaseModel):
     side: PinSide
     position: int = Field(ge=1)
     electrical_type: ElectricalType
+    intent: PinIntent | None = None
     required: bool = True
 
 

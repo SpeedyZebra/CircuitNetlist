@@ -1,0 +1,12 @@
+CIRCUIT Fault_MCU_Power_Reversed
+
+COMPONENT V1 POWER_DC_SOURCE voltage=5V
+COMPONENT U1 MCU_ATtiny402_SOIC8
+
+NET VCC:
+    V1.POS
+    U1.GND
+
+NET GND:
+    V1.NEG
+    U1.VDD

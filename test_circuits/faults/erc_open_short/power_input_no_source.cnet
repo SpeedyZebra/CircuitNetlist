@@ -1,0 +1,12 @@
+CIRCUIT Fault_Power_Input_No_Source
+
+COMPONENT U1 MCU_ATtiny402_SOIC8
+COMPONENT R1 BASIC_RESISTOR value=1kohm
+
+NET VDD:
+    U1.VDD
+    R1.1
+
+NET GND:
+    U1.GND
+    R1.2

@@ -281,3 +281,58 @@ Still intentionally limited to QA-4 scope:
 
 - Interactive mode still builds the final scene and runs visual DRC once; scene construction remains the largest remaining hot-path cost.
 - No new router algorithm, placement rewrite, Playwright execution, or simulation engine.
+
+## Milestone ERC-1 - shared open/short electrical rule checking
+
+Status: complete
+
+Implemented in this branch:
+
+- Shared production ERC entry point in `src/circuit_netlist/erc.py` through `run_electrical_rules()`.
+- Compatibility `ElectricalRuleChecker.check()` wrapper delegates to the shared engine.
+- Regression-only electrical checks moved out of `regression.py`.
+- App/API rendering, regression, circuit audit, placement/debug paths, and tests use the shared ERC engine.
+- Optional pin intent metadata added to the component model and obvious library components.
+- Pin-intent metadata added for DC sources, batteries, solar panels, charger pins, MCU supplies, 555 pins, op amp supplies, LEDs, diodes, polarized capacitors, MOSFETs, and ground symbols.
+- Terminal-short checks for DC sources, batteries, solar panels, LEDs, diodes, polarized capacitors, IC supply pins, op amp supplies, and charger/regulator critical pins.
+- Polarity checks for ground pins on positive rails, positive supply pins on ground, positive terminals on ground, negative terminals on positive rails, and op amp supply reversal.
+- Negative DC supply sources are recognized by negative voltage or `role=negative_supply`.
+- Required power/ground pin open checks and required control-pin floating checks.
+- MOSFET gate floating, gate pull-down, source-ground, and gate-tied-to-power checks remain shared.
+- Voltage-divider topology ERC checks are shared in production ERC.
+- Visual DRC now reports `DRC_UNRELATED_WIRE_INTERSECTION` for different-net wire crossings while allowing same-net junctions.
+- Strict/audit route-style validation now considers more nets so clean fixtures remain crossing-free under the stricter DRC.
+- New ERC open/short negative fixture family under `test_circuits/faults/erc_open_short/`.
+- Documentation in `docs/electrical_rule_checking.md`.
+
+Still intentionally limited to ERC-1 scope:
+
+- No simulation engine, DC solver, SPICE export, solar/weather simulation, or battery simulation.
+- No Playwright execution.
+- No major router replacement or placement rewrite.
+- ERC remains conservative and metadata-driven; it is not a full analog correctness checker.
+
+## Milestone EC-1 - rendered electrical connectivity validation
+
+Status: complete
+
+Implemented in this branch:
+
+- Shared rendered-connectivity validator in `src/circuit_netlist/rendered_connectivity.py`.
+- Scene-derived connectivity graph covering pins, wires, stubs, junctions, net labels, power symbols, and ground symbols.
+- Logical equivalence for matching net labels and matching power/ground symbols only after each local stub physically reaches its anchor.
+- Direct-wire physical-island checks so `local_wire` nets must connect through actual rendered geometry.
+- Diagnostics for missing rendered pins, unreached pins, rendered opens, rendered shorts, disconnected islands, dangling route fragments, disconnected stubs, label/symbol-without-stub cases, text/net mismatches, wrong-net pin contacts, wrong-net label/symbol contacts, and accidental extra pins on a net.
+- App/API rendering now reports a `connectivity` diagnostics bucket and rendered-connectivity metrics.
+- Legacy regression and circuit audit now run the shared rendered-connectivity validator against the canonical scene.
+- Circuit audit has a required `rendered_connectivity` stage for renderable circuits.
+- Router simplification now preserves electrical pin endpoints so branch cleanup cannot trim real pin leads back to an internal tee.
+- Tests cover valid direct, label, and power-symbol connectivity; rendered gaps; disconnected islands; wrong-net contacts; orphan fragments; app integration; import boundaries; and clean Solar, 555, and repeated-MOSFET scenes.
+- Documentation in `docs/rendered_connectivity_validation.md`.
+
+Still intentionally limited to EC-1 scope:
+
+- No new routing algorithm, placement rewrite, or global schematic solver.
+- No SPICE export, DC solver, simulation engine, solar/weather simulation, or battery simulation.
+- Rendered connectivity validates the canonical scene after routing; it does not choose placements or routes.
+- Playwright execution remains deferred.

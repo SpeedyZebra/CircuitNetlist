@@ -1,0 +1,7 @@
+CIRCUIT Fault_Polarized_Capacitor_Shorted
+
+COMPONENT C1 BASIC_CAPACITOR_POLARIZED value=10uF
+
+NET SHORT:
+    C1.POS
+    C1.NEG

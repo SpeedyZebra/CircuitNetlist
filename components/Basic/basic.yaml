@@ -32,8 +32,8 @@
   body: {renderer: polarized_capacitor, width: 140, height: 80, pin_pitch: 40}
   parameters: {value: {required: true, unit: F}, role: {required: false}}
   pins:
-    - {number: "1", name: POS, aliases: ["+"], side: left, position: 1, electrical_type: passive}
-    - {number: "2", name: NEG, aliases: ["-"], side: right, position: 1, electrical_type: passive}
+    - {number: "1", name: POS, aliases: ["+"], side: left, position: 1, electrical_type: passive, intent: supply_positive}
+    - {number: "2", name: NEG, aliases: ["-"], side: right, position: 1, electrical_type: passive, intent: supply_ground}
   metadata:
     verified_status: generic
     summary: Polarized capacitor for bulk energy storage and low-frequency filtering.
@@ -60,8 +60,8 @@
   body: {renderer: diode, width: 140, height: 80, pin_pitch: 40}
   parameters: {part: {required: false}, role: {required: false}}
   pins:
-    - {number: "1", name: A, aliases: [ANODE], side: left, position: 1, electrical_type: passive}
-    - {number: "2", name: K, aliases: [CATHODE], side: right, position: 1, electrical_type: passive}
+    - {number: "1", name: A, aliases: [ANODE], side: left, position: 1, electrical_type: passive, intent: diode_anode}
+    - {number: "2", name: K, aliases: [CATHODE], side: right, position: 1, electrical_type: passive, intent: diode_cathode}
   metadata:
     verified_status: generic
     summary: Two-terminal diode that conducts primarily from anode to cathode.
@@ -75,11 +75,11 @@
   body: {renderer: op_amp, width: 160, height: 120, pin_pitch: 20}
   parameters: {part: {required: false}, role: {required: false}}
   pins:
-    - {number: "1", name: IN-, aliases: [INV, "-", NEG], side: left, position: 2, electrical_type: input}
-    - {number: "2", name: IN+, aliases: [NONINV, "+", POS], side: left, position: 4, electrical_type: input}
-    - {number: "3", name: OUT, aliases: [OUTPUT], side: right, position: 3, electrical_type: output}
-    - {number: "4", name: V+, aliases: [VCC, VDD, VP], side: top, position: 4, electrical_type: power_in}
-    - {number: "5", name: V-, aliases: [VEE, VSS, VN], side: bottom, position: 4, electrical_type: power_in}
+    - {number: "1", name: IN-, aliases: [INV, "-", NEG], side: left, position: 2, electrical_type: input, intent: op_amp_input}
+    - {number: "2", name: IN+, aliases: [NONINV, "+", POS], side: left, position: 4, electrical_type: input, intent: op_amp_input}
+    - {number: "3", name: OUT, aliases: [OUTPUT], side: right, position: 3, electrical_type: output, intent: op_amp_output}
+    - {number: "4", name: V+, aliases: [VCC, VDD, VP], side: top, position: 4, electrical_type: power_in, intent: op_amp_positive_supply}
+    - {number: "5", name: V-, aliases: [VEE, VSS, VN], side: bottom, position: 4, electrical_type: power_in, intent: op_amp_negative_supply}
   metadata:
     verified_status: generic
     summary: Generic operational amplifier symbol for schematic-level analog circuits.
@@ -96,14 +96,14 @@
   body: {renderer: timer_555, width: 180, height: 220, pin_pitch: 36}
   parameters: {part: {required: false}, role: {required: false}}
   pins:
-    - {number: "1", name: GND, aliases: [GROUND, VSS], side: bottom, position: 4, electrical_type: power_in}
-    - {number: "2", name: TRIG, aliases: [TRIGGER], side: left, position: 3, electrical_type: input}
-    - {number: "3", name: OUT, aliases: [OUTPUT], side: right, position: 3, electrical_type: output}
-    - {number: "4", name: RESET, aliases: [RST], side: top, position: 4, electrical_type: input}
-    - {number: "5", name: CTRL, aliases: [CONTROL, CV], side: bottom, position: 2, electrical_type: input}
-    - {number: "6", name: THRESH, aliases: [THRESHOLD], side: left, position: 4, electrical_type: input}
-    - {number: "7", name: DISCH, aliases: [DISCHARGE], side: left, position: 2, electrical_type: open_drain}
-    - {number: "8", name: VCC, aliases: [VDD, V+], side: top, position: 2, electrical_type: power_in}
+    - {number: "1", name: GND, aliases: [GROUND, VSS], side: bottom, position: 4, electrical_type: power_in, intent: supply_ground}
+    - {number: "2", name: TRIG, aliases: [TRIGGER], side: left, position: 3, electrical_type: input, intent: timing_pin}
+    - {number: "3", name: OUT, aliases: [OUTPUT], side: right, position: 3, electrical_type: output, intent: digital_output}
+    - {number: "4", name: RESET, aliases: [RST], side: top, position: 4, electrical_type: input, intent: reset_pin}
+    - {number: "5", name: CTRL, aliases: [CONTROL, CV], side: bottom, position: 2, electrical_type: input, intent: control_pin}
+    - {number: "6", name: THRESH, aliases: [THRESHOLD], side: left, position: 4, electrical_type: input, intent: timing_pin}
+    - {number: "7", name: DISCH, aliases: [DISCHARGE], side: left, position: 2, electrical_type: open_drain, intent: open_drain_output}
+    - {number: "8", name: VCC, aliases: [VDD, V+], side: top, position: 2, electrical_type: power_in, intent: supply_positive}
   metadata:
     verified_status: generic
     summary: Timer/oscillator IC commonly used for monostable and astable timing circuits.
@@ -124,9 +124,9 @@
   body: {renderer: nmos, width: 140, height: 120, pin_pitch: 40}
   parameters: {part: {required: false}, role: {required: false}}
   pins:
-    - {number: "1", name: G, aliases: [GATE], side: left, position: 1, electrical_type: input}
-    - {number: "2", name: D, aliases: [DRAIN], side: top, position: 2, electrical_type: passive}
-    - {number: "3", name: S, aliases: [SOURCE], side: bottom, position: 2, electrical_type: passive}
+    - {number: "1", name: G, aliases: [GATE], side: left, position: 1, electrical_type: input, intent: mosfet_gate}
+    - {number: "2", name: D, aliases: [DRAIN], side: top, position: 2, electrical_type: passive, intent: mosfet_drain}
+    - {number: "3", name: S, aliases: [SOURCE], side: bottom, position: 2, electrical_type: passive, intent: mosfet_source}
   metadata:
     verified_status: generic
     mosfet_mode: enhancement
@@ -144,9 +144,9 @@
   body: {renderer: pmos, width: 140, height: 120, pin_pitch: 40}
   parameters: {part: {required: false}, role: {required: false}}
   pins:
-    - {number: "1", name: G, aliases: [GATE], side: left, position: 1, electrical_type: input}
-    - {number: "2", name: D, aliases: [DRAIN], side: bottom, position: 2, electrical_type: passive}
-    - {number: "3", name: S, aliases: [SOURCE], side: top, position: 2, electrical_type: passive}
+    - {number: "1", name: G, aliases: [GATE], side: left, position: 1, electrical_type: input, intent: mosfet_gate}
+    - {number: "2", name: D, aliases: [DRAIN], side: bottom, position: 2, electrical_type: passive, intent: mosfet_drain}
+    - {number: "3", name: S, aliases: [SOURCE], side: top, position: 2, electrical_type: passive, intent: mosfet_source}
   metadata:
     verified_status: generic
     mosfet_mode: enhancement
@@ -162,7 +162,7 @@
   category: Basic
   body: {renderer: ground, width: 120, height: 80, pin_pitch: 20}
   pins:
-    - {number: "1", name: GND, aliases: [0V], side: top, position: 3, electrical_type: power_in}
+    - {number: "1", name: GND, aliases: [0V], side: top, position: 3, electrical_type: power_in, intent: supply_ground}
 - id: BASIC_TEST_POINT
   name: Test Point
   category: Basic

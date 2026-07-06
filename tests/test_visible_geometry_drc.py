@@ -125,6 +125,61 @@ def test_power_symbol_stub_crosses_component_symbol_is_reported() -> None:
     assert "DRC_STUB_SYMBOL_OVERLAP" in codes
 
 
+def test_different_net_orthogonal_wire_crossing_is_reported() -> None:
+    diagnostics, metrics = visual_drc_from_scene(
+        scene_with(
+            [
+                segment_element("wire-A", (40, 100, 220, 100), net="A", parent="net-A"),
+                segment_element("wire-B", (120, 40, 120, 180), net="B", parent="net-B"),
+            ]
+        )
+    )
+    assert "DRC_UNRELATED_WIRE_INTERSECTION" in [diag.code for diag in diagnostics]
+    assert metrics["unrelated_wire_intersections"] == 1
+
+
+def test_different_net_diagonal_wire_crossing_is_reported() -> None:
+    codes = codes_for(
+        [
+            segment_element("wire-A", (40, 40, 220, 220), net="A", parent="net-A"),
+            segment_element("wire-B", (40, 220, 220, 40), net="B", parent="net-B"),
+        ]
+    )
+    assert "DRC_UNRELATED_WIRE_INTERSECTION" in codes
+
+
+def test_same_net_junction_and_endpoint_contact_are_allowed() -> None:
+    codes = codes_for(
+        [
+            segment_element("wire-A1", (40, 100, 220, 100), net="A", parent="net-A"),
+            segment_element("wire-A2", (120, 40, 120, 180), net="A", parent="net-A"),
+            segment_element("wire-A3", (220, 100, 300, 100), net="A", parent="net-A"),
+        ]
+    )
+    assert "DRC_UNRELATED_WIRE_INTERSECTION" not in codes
+
+
+def test_different_net_endpoint_touch_is_reported() -> None:
+    codes = codes_for(
+        [
+            segment_element("wire-A", (40, 100, 120, 100), net="A", parent="net-A"),
+            segment_element("wire-B", (120, 100, 220, 100), net="B", parent="net-B"),
+        ]
+    )
+    assert "DRC_UNRELATED_WIRE_INTERSECTION" in codes
+
+
+def test_collinear_unrelated_overlap_still_uses_overlap_diagnostic() -> None:
+    codes = codes_for(
+        [
+            segment_element("wire-A", (40, 100, 160, 100), net="A", parent="net-A"),
+            segment_element("wire-B", (100, 100, 220, 100), net="B", parent="net-B"),
+        ]
+    )
+    assert "DRC_WIRE_WIRE_OVERLAP" in codes
+    assert "DRC_UNRELATED_WIRE_INTERSECTION" not in codes
+
+
 def test_same_net_accidental_visual_overlap_is_reported_when_not_own_attachment() -> None:
     codes = codes_for(
         [
@@ -177,3 +232,4 @@ def test_solar_circuit_has_zero_visible_overlap_diagnostics() -> None:
     assert metrics["wire_label_overlaps"] == 0
     assert metrics["stub_label_overlaps"] == 0
     assert metrics["power_symbol_overlaps"] == 0
+    assert metrics["unrelated_wire_intersections"] == 0

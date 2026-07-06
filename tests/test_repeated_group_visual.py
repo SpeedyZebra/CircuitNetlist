@@ -43,7 +43,9 @@ def run_pipeline(path: Path, existing: Layout | None = None):
     layout = DeterministicPlacementEngine().place(circuit, library, existing)
     layout_again = DeterministicPlacementEngine().place(circuit, library, existing)
     assert stable_layout_dump(layout) == stable_layout_dump(layout_again)
-    routes = ManhattanRouter(validate_auto_route_styles=False).route(circuit, library, layout)
+    strict_route_cases = {"multi_rc_filter.cnet", "multi_decoupling_with_rc_filters.cnet"}
+    router = ManhattanRouter.for_strict() if path.name in strict_route_cases else ManhattanRouter(validate_auto_route_styles=False)
+    routes = router.route(circuit, library, layout)
     drc, metrics = visual_drc(circuit, library, layout, routes)
     render_circuit(circuit, library, layout, routes, [*validation, *drc])
     return circuit, analysis, layout, drc, metrics
