@@ -1,6 +1,7 @@
 from pathlib import Path
 
 from circuit_netlist.component_library import load_component_library
+from circuit_netlist.constraint_placement import PlacementOptimizationConfig
 from circuit_netlist.parser import NetlistParser
 from circuit_netlist.placement import DeterministicPlacementEngine
 from circuit_netlist.regression import visual_drc, visual_drc_from_scene
@@ -169,7 +170,7 @@ def test_solar_circuit_has_zero_visible_overlap_diagnostics() -> None:
     library = load_component_library(ROOT / "components")
     circuit, diagnostics = NetlistParser().parse_file(ROOT / "examples" / "solar_led.cnet")
     assert circuit is not None, diagnostics
-    layout = DeterministicPlacementEngine().place(circuit, library)
+    layout = DeterministicPlacementEngine(optimization_config=PlacementOptimizationConfig(mode="off")).place(circuit, library)
     routes = ManhattanRouter(validate_auto_route_styles=False).route(circuit, library, layout)
     drc, metrics = visual_drc(circuit, library, layout, routes)
     assert [diag.code for diag in drc] == []

@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from circuit_netlist.component_library import load_component_library
+from circuit_netlist.constraint_placement import PlacementOptimizationConfig
 from circuit_netlist.models import Layout, Placement
 from circuit_netlist.parser import NetlistParser
 from circuit_netlist.placement import DeterministicPlacementEngine
@@ -11,6 +12,10 @@ from circuit_netlist.validator import CircuitValidator
 
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+def heuristic_placement_engine() -> DeterministicPlacementEngine:
+    return DeterministicPlacementEngine(optimization_config=PlacementOptimizationConfig(mode="off"))
 
 
 RENAMED_SOLAR = """CIRCUIT Renamed_Solar
@@ -253,7 +258,7 @@ NET SWITCH:
 
 def test_renamed_solar_layout_preserves_relative_topology() -> None:
     circuit, library, analysis = analyze_text(RENAMED_SOLAR)
-    layout = DeterministicPlacementEngine().place(circuit, library)
+    layout = heuristic_placement_engine().place(circuit, library)
     assert layout.components["PANELX"].x < layout.components["PMIC7"].x < layout.components["MCU7"].x < layout.components["Q12"].x
     assert layout.components["R3"].rotation == 0
     assert layout.components["R9"].rotation == 90
@@ -270,11 +275,11 @@ def test_renamed_solar_layout_preserves_relative_topology() -> None:
 
 def test_placement_is_deterministic_and_locked_positions_remain() -> None:
     circuit, library, _ = analyze_text(RENAMED_SOLAR)
-    layout1 = DeterministicPlacementEngine().place(circuit, library)
-    layout2 = DeterministicPlacementEngine().place(circuit, library)
+    layout1 = heuristic_placement_engine().place(circuit, library)
+    layout2 = heuristic_placement_engine().place(circuit, library)
     assert layout1.model_dump(mode="json") == layout2.model_dump(mode="json")
     existing = Layout(components={"Q12": Placement(x=321, y=654, rotation=90, locked=True)})
-    layout3 = DeterministicPlacementEngine().place(circuit, library, existing)
+    layout3 = heuristic_placement_engine().place(circuit, library, existing)
     assert layout3.components["Q12"] == Placement(x=321, y=654, rotation=90, locked=True)
 
 
@@ -395,7 +400,7 @@ NET GND:
     R_PULL2.2
     Q2.S
 """)
-    layout = DeterministicPlacementEngine().place(circuit, library)
+    layout = heuristic_placement_engine().place(circuit, library)
     assert layout.components["Q1"].y != layout.components["Q2"].y
     assert len({(layout.components[ref].x, layout.components[ref].y) for ref in ["Q1", "Q2", "LED1", "LED2", "R_LED1", "R_LED2", "R_GATE1", "R_GATE2", "R_PULL1", "R_PULL2"]}) == 10
 
@@ -437,7 +442,7 @@ NET GND:
     CF1.2
     CF2.2
 """)
-    layout = DeterministicPlacementEngine().place(circuit, library)
+    layout = heuristic_placement_engine().place(circuit, library)
     assert (layout.components["C1"].x, layout.components["C1"].y) != (layout.components["C2"].x, layout.components["C2"].y)
     assert (layout.components["R1"].x, layout.components["R1"].y) != (layout.components["R2"].x, layout.components["R2"].y)
     assert (layout.components["CF1"].x, layout.components["CF1"].y) != (layout.components["CF2"].x, layout.components["CF2"].y)

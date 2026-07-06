@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from math import floor
+
 from .component_library import ComponentLibrary
 from .geometry import (
     absolute_pin_point,
@@ -13,7 +15,7 @@ from .geometry import (
     symbol_box,
     visual_pin_side,
 )
-from .models import Circuit, ComponentDefinition, Layout, Placement, PinDefinition, RoutedNet
+from .models import Circuit, ComponentDefinition, Layout, Placement, PinDefinition, RenderQualityMode, RoutedNet
 
 
 Box = tuple[float, float, float, float]
@@ -31,8 +33,59 @@ NET_LABEL_ESCAPE_DISTANCE = 24
 GROUND_NETS = {"GND", "AGND", "DGND", "PGND"}
 
 
+class SpatialIndex:
+    def __init__(self, cell_size: int = 96) -> None:
+        self.cell_size = cell_size
+        self.items: list[tuple[Box, object]] = []
+        self.buckets: dict[tuple[int, int], list[int]] = {}
+
+    def add(self, box: Box, item: object) -> None:
+        index = len(self.items)
+        self.items.append((box, item))
+        for cell in self._cells_for_box(box):
+            self.buckets.setdefault(cell, []).append(index)
+
+    def query(self, box: Box) -> list[object]:
+        seen: set[int] = set()
+        result: list[object] = []
+        for cell in self._cells_for_box(box):
+            for index in self.buckets.get(cell, []):
+                if index in seen:
+                    continue
+                seen.add(index)
+                item_box, item = self.items[index]
+                if boxes_overlap(box, item_box):
+                    result.append(item)
+        return result
+
+    def _cells_for_box(self, box: Box) -> list[tuple[int, int]]:
+        min_x, min_y, max_x, max_y = box
+        if max_x < min_x:
+            min_x, max_x = max_x, min_x
+        if max_y < min_y:
+            min_y, max_y = max_y, min_y
+        x1 = floor(min_x / self.cell_size)
+        x2 = floor(max_x / self.cell_size)
+        y1 = floor(min_y / self.cell_size)
+        y2 = floor(max_y / self.cell_size)
+        return [(x, y) for x in range(x1, x2 + 1) for y in range(y1, y2 + 1)]
+
+
 class LabelPlacementContext:
-    def __init__(self, circuit: Circuit, library: ComponentLibrary, layout: Layout, routes: list[RoutedNet]) -> None:
+    def __init__(
+        self,
+        circuit: Circuit,
+        library: ComponentLibrary,
+        layout: Layout,
+        routes: list[RoutedNet],
+        quality: RenderQualityMode | str = RenderQualityMode.STRICT,
+    ) -> None:
+        self.quality_mode = quality if isinstance(quality, RenderQualityMode) else RenderQualityMode(quality)
+        self.metrics: dict[str, float] = {
+            "label_candidate_count": 0,
+            "power_candidate_count": 0,
+            "collision_check_count": 0,
+        }
         self.body_boxes: list[Box] = []
         self.physical_boxes: list[Box] = []
         self.symbol_clearance_boxes: list[Box] = []
@@ -40,7 +93,18 @@ class LabelPlacementContext:
         self.attachment_boxes: list[Box] = []
         self.pin_escape_boxes: list[tuple[tuple[int, int, str], Box]] = []
         self.stub_segments: list[Segment] = []
-        self.wire_segments: list[Segment] = [segment for route in routes for segment in route.segments]
+        self.wire_segments: list[Segment] = []
+        self.body_index = SpatialIndex()
+        self.physical_index = SpatialIndex()
+        self.symbol_clearance_index = SpatialIndex()
+        self.text_index = SpatialIndex()
+        self.attachment_index = SpatialIndex()
+        self.pin_escape_index = SpatialIndex()
+        self.wire_index = SpatialIndex()
+        self.stub_index = SpatialIndex()
+        for route in routes:
+            for segment in route.segments:
+                self._add_wire_segment(segment)
         for instance in circuit.components:
             definition = library.get(instance.component_id)
             placement = layout.components.get(instance.ref)
@@ -48,14 +112,14 @@ class LabelPlacementContext:
                 continue
             body_box = component_body_box(definition, placement)
             physical_symbol_box = symbol_box(definition, placement)
-            self.body_boxes.append(body_box)
-            self.body_boxes.append(physical_symbol_box)
-            self.physical_boxes.append(body_box)
-            self.physical_boxes.append(physical_symbol_box)
-            self.symbol_clearance_boxes.append(inflate_box(physical_symbol_box, 10))
+            self._add_body_box(body_box)
+            self._add_body_box(physical_symbol_box)
+            self._add_physical_box(body_box)
+            self._add_physical_box(physical_symbol_box)
+            self._add_symbol_clearance_box(inflate_box(physical_symbol_box, 10))
             if definition.category == "MCU":
                 _, _, body_x2, body_y2 = body_box
-                self.body_boxes.append(
+                self._add_body_box(
                     (
                         placement.x - MCU_CLEARANCE,
                         placement.y - MCU_CLEARANCE + 20,
@@ -86,52 +150,113 @@ class LabelPlacementContext:
             side = visual_pin_side(definition, pin, placement)
             end_x = x + escape_dx(side, POWER_PIN_ESCAPE_DISTANCE)
             end_y = y + escape_dy(side, POWER_PIN_ESCAPE_DISTANCE)
-            self.pin_escape_boxes.append(((x, y, side), segment_box((x, y, end_x, end_y), 10)))
+            self._add_pin_escape_box((x, y, side), segment_box((x, y, end_x, end_y), 10))
+
+    @property
+    def interactive(self) -> bool:
+        return self.quality_mode == RenderQualityMode.INTERACTIVE
+
+    def _add_body_box(self, box: Box) -> None:
+        self.body_boxes.append(box)
+        self.body_index.add(box, box)
+
+    def _add_physical_box(self, box: Box) -> None:
+        self.physical_boxes.append(box)
+        self.physical_index.add(box, box)
+
+    def _add_symbol_clearance_box(self, box: Box) -> None:
+        self.symbol_clearance_boxes.append(box)
+        self.symbol_clearance_index.add(box, box)
+
+    def _add_text_box(self, box: Box) -> None:
+        self.text_boxes.append(box)
+        self.text_index.add(box, box)
+
+    def _add_attachment_box(self, box: Box) -> None:
+        self.attachment_boxes.append(box)
+        self.attachment_index.add(box, box)
+
+    def _add_pin_escape_box(self, key: tuple[int, int, str], box: Box) -> None:
+        item = (key, box)
+        self.pin_escape_boxes.append(item)
+        self.pin_escape_index.add(box, item)
+
+    def _add_wire_segment(self, segment: Segment) -> None:
+        self.wire_segments.append(segment)
+        self.wire_index.add(segment_box(segment, 1), segment)
+
+    def _add_stub_segment(self, segment: Segment) -> None:
+        self.stub_segments.append(segment)
+        self.stub_index.add(segment_box(segment, 1), segment)
+
+    def _count_checks(self, items: list[object]) -> list[object]:
+        self.metrics["collision_check_count"] += len(items)
+        return items
+
+    def body_boxes_near(self, box: Box) -> list[Box]:
+        return [item for item in self._count_checks(self.body_index.query(box)) if isinstance(item, tuple)]
+
+    def text_boxes_near(self, box: Box) -> list[Box]:
+        return [item for item in self._count_checks(self.text_index.query(box)) if isinstance(item, tuple)]
+
+    def attachment_boxes_near(self, box: Box) -> list[Box]:
+        return [item for item in self._count_checks(self.attachment_index.query(box)) if isinstance(item, tuple)]
+
+    def segments_near_box(self, box: Box) -> list[Segment]:
+        wire_segments = self._count_checks(self.wire_index.query(box))
+        stub_segments = self._count_checks(self.stub_index.query(box))
+        return [item for item in [*wire_segments, *stub_segments] if isinstance(item, tuple)]
 
     def reserve_text(self, text: str, x: float, y: float, anchor: str = "start") -> Box:
         box = text_box(text, x, y, anchor)
-        self.text_boxes.append(inflate_box(box, MIN_LABEL_GAP))
+        self._add_text_box(inflate_box(box, MIN_LABEL_GAP))
         return box
 
     def collides(self, box: Box) -> bool:
         padded = inflate_box(box, MIN_LABEL_GAP)
-        if any(boxes_overlap(padded, body) for body in self.body_boxes):
+        if any(boxes_overlap(padded, body) for body in self.body_boxes_near(padded)):
             return True
-        if any(boxes_overlap(padded, symbol) for symbol in self.symbol_clearance_boxes):
+        if any(boxes_overlap(padded, symbol) for symbol in self._count_checks(self.symbol_clearance_index.query(padded))):
             return True
-        if any(boxes_overlap(padded, text) for text in self.text_boxes):
+        if any(boxes_overlap(padded, text) for text in self.text_boxes_near(padded)):
             return True
-        if any(boxes_overlap(padded, attachment) for attachment in self.attachment_boxes):
+        if any(boxes_overlap(padded, attachment) for attachment in self.attachment_boxes_near(padded)):
             return True
-        return any(segment_crosses_box(segment, inflate_box(box, MIN_WIRE_TO_TEXT_GAP)) for segment in [*self.wire_segments, *self.stub_segments])
+        wire_box = inflate_box(box, MIN_WIRE_TO_TEXT_GAP)
+        return any(segment_crosses_box(segment, wire_box) for segment in self.segments_near_box(wire_box))
 
     def segment_collides_with_body(self, segment: Segment) -> bool:
-        return any(segment_crosses_box(segment, body) for body in self.physical_boxes)
+        candidates = self._count_checks(self.physical_index.query(segment_box(segment, 1)))
+        return any(segment_crosses_box(segment, body) for body in candidates)
 
     def segment_collides_with_symbol_clearance(self, segment: Segment) -> bool:
-        return any(segment_crosses_box(segment, body) for body in self.symbol_clearance_boxes)
+        candidates = self._count_checks(self.symbol_clearance_index.query(segment_box(segment, 1)))
+        return any(segment_crosses_box(segment, body) for body in candidates)
 
     def segment_collides_with_wire(self, segment: Segment) -> bool:
-        return any(segments_collinear_overlap(segment, other) for other in [*self.wire_segments, *self.stub_segments])
+        return any(segments_collinear_overlap(segment, other) for other in self.segments_near_box(segment_box(segment, 1)))
 
     def segment_collides_with_text(self, segment: Segment) -> bool:
-        return any(segment_crosses_box(segment, box) for box in self.text_boxes)
+        candidates = self.text_boxes_near(segment_box(segment, 1))
+        return any(segment_crosses_box(segment, box) for box in candidates)
 
     def segment_collides_with_attachment(self, segment: Segment) -> bool:
-        return any(segment_crosses_box(segment, box) for box in self.attachment_boxes)
+        candidates = self.attachment_boxes_near(segment_box(segment, 1))
+        return any(segment_crosses_box(segment, box) for box in candidates)
 
     def reserve_stub(self, segment: Segment) -> None:
-        self.stub_segments.append(segment)
+        self._add_stub_segment(segment)
 
     def reserve_label_shape(self, box: Box) -> None:
-        self.attachment_boxes.append(inflate_box(box, MIN_LABEL_GAP))
+        self._add_attachment_box(inflate_box(box, MIN_LABEL_GAP))
 
     def reserve_symbol(self, box: Box) -> None:
-        self.attachment_boxes.append(inflate_box(box, MIN_SYMBOL_TO_TEXT_GAP))
+        self._add_attachment_box(inflate_box(box, MIN_SYMBOL_TO_TEXT_GAP))
 
     def symbol_collides_with_other_pin_escape(self, box: Box, source_key: tuple[int, int, str]) -> bool:
         padded = inflate_box(box, MIN_SYMBOL_TO_TEXT_GAP)
-        return any(key != source_key and boxes_overlap(padded, escape_box) for key, escape_box in self.pin_escape_boxes)
+        candidates = self._count_checks(self.pin_escape_index.query(padded))
+        return any(key != source_key and boxes_overlap(padded, escape_box) for key, escape_box in candidates)
 
 
 def component_label_positions(definition: ComponentDefinition, placement: Placement) -> tuple[int, int, str, int, int, str]:
@@ -187,15 +312,22 @@ def choose_ground_symbol_attachment(x: int, y: int, side: str, context: LabelPla
 
 def choose_power_attachment(net_name: str, x: int, y: int, side: str, context: LabelPlacementContext | None, kind: str) -> tuple[list[Segment], int, int]:
     best: tuple[int, list[Segment], int, int] | None = None
-    escape_distances = [POWER_PIN_ESCAPE_DISTANCE, 72, 88, 104, 128, 152]
-    vertical_offsets = [POWER_SYMBOL_VERTICAL_OFFSET, 56, 76, 96, 120, 150, 190, 240]
-    lateral_offsets = [0, 24, -24, 48, -48, 72, -72, 96, -96, 128, -128, 160, -160]
+    if context and context.interactive:
+        escape_distances = [POWER_PIN_ESCAPE_DISTANCE, 88, 120]
+        vertical_offsets = [POWER_SYMBOL_VERTICAL_OFFSET, 56, 84, 120]
+        lateral_offsets = [0, 32, -32, 64, -64, 96, -96]
+    else:
+        escape_distances = [POWER_PIN_ESCAPE_DISTANCE, 72, 88, 104, 128, 152]
+        vertical_offsets = [POWER_SYMBOL_VERTICAL_OFFSET, 56, 76, 96, 120, 150, 190, 240]
+        lateral_offsets = [0, 24, -24, 48, -48, 72, -72, 96, -96, 128, -128, 160, -160]
     if side in {"top", "bottom"}:
         for escape_distance in escape_distances:
             escape_y = y + escape_dy(side, escape_distance)
             for lateral in lateral_offsets:
                 symbol_x = x + lateral
                 for vertical_offset in vertical_offsets:
+                    if context:
+                        context.metrics["power_candidate_count"] += 1
                     symbol_y = escape_y + vertical_offset if kind == "ground" else escape_y - vertical_offset
                     segments = attachment_segments(x, y, side, x, escape_y, symbol_y, symbol_x)
                     collision_count = attachment_collision_count(segments, symbol_x, symbol_y, net_name, kind, context, (x, y, side))
@@ -214,6 +346,8 @@ def choose_power_attachment(net_name: str, x: int, y: int, side: str, context: L
         for lateral in lateral_offsets:
             symbol_x = escape_x + lateral
             for vertical_offset in vertical_offsets:
+                if context:
+                    context.metrics["power_candidate_count"] += 1
                 symbol_y = escape_y + vertical_offset if kind == "ground" else escape_y - vertical_offset
                 segments = attachment_segments(x, y, side, escape_x, escape_y, symbol_y, symbol_x)
                 collision_count = attachment_collision_count(segments, symbol_x, symbol_y, net_name, kind, context, (x, y, side))
@@ -293,11 +427,12 @@ def attachment_collision_count(
         for segment in segments
         if segment_crosses_box(segment, padded_symbol) and not segment_endpoint_touches_box(segment, padded_symbol)
     )
-    count += 100 * sum(1 for body in context.body_boxes if boxes_overlap(padded_symbol, body))
-    count += 25 * sum(1 for text in context.text_boxes if boxes_overlap(padded_symbol, text))
-    count += 25 * sum(1 for attachment in context.attachment_boxes if boxes_overlap(padded_symbol, attachment))
+    count += 100 * sum(1 for body in context.body_boxes_near(padded_symbol) if boxes_overlap(padded_symbol, body))
+    count += 25 * sum(1 for text in context.text_boxes_near(padded_symbol) if boxes_overlap(padded_symbol, text))
+    count += 25 * sum(1 for attachment in context.attachment_boxes_near(padded_symbol) if boxes_overlap(padded_symbol, attachment))
     count += 5 * int(context.symbol_collides_with_other_pin_escape(symbol_bounds, source_key))
-    count += 25 * sum(1 for segment in [*context.wire_segments, *context.stub_segments] if segment_crosses_box(segment, inflate_box(symbol_bounds, MIN_WIRE_TO_TEXT_GAP)))
+    wire_box = inflate_box(symbol_bounds, MIN_WIRE_TO_TEXT_GAP)
+    count += 25 * sum(1 for segment in context.segments_near_box(wire_box) if segment_crosses_box(segment, wire_box))
     return count
 
 
@@ -327,14 +462,17 @@ def choose_net_label_position(
     preferred_side: str,
     context: LabelPlacementContext | None,
 ) -> tuple[list[Segment], int, int, str, int, int, str]:
-    escape_distances = [NET_LABEL_ESCAPE_DISTANCE, 36, 52, 68, 92, 116]
+    escape_distances = [NET_LABEL_ESCAPE_DISTANCE, 36, 56] if context and context.interactive else [NET_LABEL_ESCAPE_DISTANCE, 36, 52, 68, 92, 116]
     sides = unique_sides([preferred_side, "right", "left", "top", "bottom"])
+    label_distances = range(1, 5) if context and context.interactive else range(1, 8)
     best: tuple[int, list[Segment], int, int, str, int, int, str] | None = None
     for escape_distance in escape_distances:
         escape_x = x + escape_dx(preferred_side, escape_distance)
         escape_y = y + escape_dy(preferred_side, escape_distance)
         for render_side in sides:
-            for distance in range(1, 8):
+            for distance in label_distances:
+                if context:
+                    context.metrics["label_candidate_count"] += 1
                 dx, dy, anchor, text_dx, text_dy = label_vector(render_side, distance)
                 stub_x = escape_x + dx
                 stub_y = escape_y + dy

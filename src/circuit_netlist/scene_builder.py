@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+from time import perf_counter
 from typing import Any
 
 from .component_library import ComponentLibrary
 from .geometry import absolute_pin_point, component_body_box, component_size, inflate_box, symbol_box
-from .models import Circuit, ComponentDefinition, Layout, Placement, RoutedNet
+from .models import Circuit, ComponentDefinition, Layout, Placement, RenderQualityMode, RoutedNet
 from .scene import Bounds, LineSegment, Point, RenderPrimitive, SceneElement, SchematicScene, TextGeometry
 from .schematic_geometry import (
     GROUND_NETS,
@@ -43,18 +44,43 @@ OPEN_SYMBOL_RENDERERS = {
 }
 
 
-def build_schematic_scene(circuit: Circuit, library: ComponentLibrary, layout: Layout, routes: list[RoutedNet]) -> SchematicScene:
+def build_schematic_scene(
+    circuit: Circuit,
+    library: ComponentLibrary,
+    layout: Layout,
+    routes: list[RoutedNet],
+    quality: RenderQualityMode | str = RenderQualityMode.STRICT,
+) -> SchematicScene:
     """Build the canonical geometry scene shared by rendering, DRC, and hit testing."""
-    context = LabelPlacementContext(circuit, library, layout, routes)
+    quality_mode = quality if isinstance(quality, RenderQualityMode) else RenderQualityMode(quality)
+    total_start = perf_counter()
+    context_start = perf_counter()
+    context = LabelPlacementContext(circuit, library, layout, routes, quality=quality_mode)
+    context_time_ms = (perf_counter() - context_start) * 1000
     elements: list[SceneElement] = []
+    route_start = perf_counter()
     for route_index, route in enumerate(routes):
         elements.extend(_route_elements(route, route_index, context))
+    route_time_ms = (perf_counter() - route_start) * 1000
+    component_start = perf_counter()
     for component_index, instance in enumerate(circuit.components):
         definition = library.get(instance.component_id)
         placement = layout.components.get(instance.ref)
         if definition and placement:
             elements.extend(_component_elements(instance.ref, definition, placement, component_index))
+    component_time_ms = (perf_counter() - component_start) * 1000
     canvas_bounds = _scene_canvas_bounds(layout, elements)
+    scene_time_ms = (perf_counter() - total_start) * 1000
+    scene_timing = {
+        "scene_context_time_ms": round(context_time_ms, 3),
+        "scene_route_element_time_ms": round(route_time_ms, 3),
+        "scene_component_time_ms": round(component_time_ms, 3),
+        "scene_label_placement_time_ms": round(float(context.metrics.get("scene_label_placement_time_ms", 0)), 3),
+        "scene_total_build_time_ms": round(scene_time_ms, 3),
+        "label_candidate_count": int(context.metrics.get("label_candidate_count", 0)),
+        "power_candidate_count": int(context.metrics.get("power_candidate_count", 0)),
+        "collision_check_count": int(context.metrics.get("collision_check_count", 0)),
+    }
     return SchematicScene(
         circuit_name=circuit.name,
         canvas_bounds=canvas_bounds,
@@ -65,6 +91,8 @@ def build_schematic_scene(circuit: Circuit, library: ComponentLibrary, layout: L
             "route_count": len(routes),
             "orientations": {ref: placement.rotation for ref, placement in sorted(layout.components.items())},
             "canvas": dict(layout.canvas),
+            "quality_mode": quality_mode.value,
+            "timing": scene_timing,
         },
     )
 
@@ -91,7 +119,9 @@ def _route_elements(route: RoutedNet, route_index: int, context: Any) -> list[Sc
             x = int(endpoint["x"])
             y = int(endpoint["y"])
             side = str(endpoint.get("side", "right"))
+            label_start = perf_counter()
             segments, stub_x, stub_y, anchor, text_x, text_y, render_side = choose_net_label_position(route.name, x, y, side, context)
+            context.metrics["scene_label_placement_time_ms"] = context.metrics.get("scene_label_placement_time_ms", 0) + (perf_counter() - label_start) * 1000
             flag_bounds = Bounds.from_tuple(label_flag_box(stub_x, stub_y, render_side))
             for segment in segments:
                 context.reserve_stub(segment)
@@ -152,6 +182,7 @@ def _route_elements(route: RoutedNet, route_index: int, context: Any) -> list[Sc
             side = str(endpoint.get("side", "right"))
             endpoint_id = f"power-symbol-{safe_id(route.name)}-{index}"
             is_ground = route.name in GROUND_NETS
+            label_start = perf_counter()
             if is_ground:
                 stub_segments, symbol_x, symbol_y = choose_ground_symbol_attachment(x, y, side, context)
                 context.reserve_text(route.name, symbol_x, symbol_y + 42, "middle")
@@ -175,6 +206,7 @@ def _route_elements(route: RoutedNet, route_index: int, context: Any) -> list[Sc
                 symbol_primitives = [
                     RenderPrimitive(kind="path", style_class="power-shape power-flag", geometry={"d": f"M {symbol_x - 14} {symbol_y + 12} L {symbol_x} {symbol_y - 8} L {symbol_x + 14} {symbol_y + 12} Z"})
                 ]
+            context.metrics["scene_label_placement_time_ms"] = context.metrics.get("scene_label_placement_time_ms", 0) + (perf_counter() - label_start) * 1000
             for segment in stub_segments:
                 context.reserve_stub(segment)
             for segment_index, segment in enumerate(stub_segments):

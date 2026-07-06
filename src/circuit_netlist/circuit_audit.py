@@ -16,7 +16,7 @@ from .component_library import ComponentLibrary, load_component_library
 from .diagnostics import compare_expected_diagnostics, diagnostic_codes, diagnostic_subsystem, normalize_diagnostics
 from .erc import ElectricalRuleChecker
 from .exporters import export_png_from_scene, export_svg_from_scene
-from .models import Circuit, Diagnostic, Layout, RoutedNet, Severity
+from .models import Circuit, Diagnostic, Layout, RenderQualityMode, RoutedNet, Severity
 from .parser import NetlistParser
 from .placement import DeterministicPlacementEngine
 from .regression import extra_regression_checks
@@ -210,7 +210,7 @@ class CircuitAuditRunner:
 
     def _build_scene(self, circuit: Circuit, layout: Layout, routes: list[RoutedNet], result: AuditResult, diagnostics: list[Diagnostic]) -> SchematicScene | None:
         try:
-            scene = build_schematic_scene(circuit, self.library, layout, routes)
+            scene = build_schematic_scene(circuit, self.library, layout, routes, quality=RenderQualityMode.AUDIT)
             scene_diagnostics = _scene_diagnostics(scene)
             diagnostics.extend(scene_diagnostics)
             result.stages["scene"] = "fail" if scene_diagnostics else "pass"

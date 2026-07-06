@@ -91,7 +91,7 @@ CURRENT_STATE = CurrentCircuitState(
     source_text=EXAMPLE_NETLIST.read_text(encoding="utf-8") if EXAMPLE_NETLIST.exists() else None,
     layout_text=EXAMPLE_LAYOUT.read_text(encoding="utf-8") if EXAMPLE_LAYOUT.exists() else None,
 )
-CURRENT_RENDER_CACHE: dict[str, Any] = {"key": None, "context": None}
+CURRENT_RENDER_CACHE: dict[str, Any] = {"key": None, "context": None, "contexts": {}}
 
 
 def library() -> ComponentLibrary:
@@ -111,6 +111,7 @@ def write_layout(layout: Layout) -> None:
 def invalidate_render_cache() -> None:
     CURRENT_RENDER_CACHE["key"] = None
     CURRENT_RENDER_CACHE["context"] = None
+    CURRENT_RENDER_CACHE["contexts"] = {}
 
 
 def normalized_quality(quality: RenderQualityMode | str = RenderQualityMode.INTERACTIVE) -> RenderQualityMode:
@@ -145,6 +146,43 @@ def render_cache_key(source_text: str, source_filename: str, layout_text: str | 
     return hashlib.sha256(json.dumps(payload, sort_keys=True).encode("utf-8")).hexdigest()
 
 
+def cached_render_context(key: str) -> dict[str, Any] | None:
+    contexts = CURRENT_RENDER_CACHE.get("contexts")
+    if isinstance(contexts, dict):
+        context = contexts.get(key)
+        if isinstance(context, dict):
+            return context
+    if CURRENT_RENDER_CACHE.get("key") == key:
+        context = CURRENT_RENDER_CACHE.get("context")
+        if isinstance(context, dict):
+            return context
+    return None
+
+
+def mark_cache_hit(context: dict[str, Any]) -> dict[str, Any]:
+    context["cache_hit"] = True
+    metrics = context.get("metrics", {})
+    if isinstance(metrics, dict):
+        timing = metrics.get("timing", {})
+        if isinstance(timing, dict):
+            timing["cache_hit"] = True
+    return context
+
+
+def store_render_context(keys: list[str], context: dict[str, Any]) -> None:
+    contexts = CURRENT_RENDER_CACHE.setdefault("contexts", {})
+    if not isinstance(contexts, dict):
+        contexts = {}
+        CURRENT_RENDER_CACHE["contexts"] = contexts
+    for key in keys:
+        contexts[key] = context
+    while len(contexts) > 8:
+        oldest_key = next(iter(contexts))
+        contexts.pop(oldest_key, None)
+    CURRENT_RENDER_CACHE["key"] = keys[-1] if keys else None
+    CURRENT_RENDER_CACHE["context"] = context
+
+
 def placement_engine_for_quality(quality: RenderQualityMode, existing_layout: Layout | None) -> DeterministicPlacementEngine:
     if quality == RenderQualityMode.INTERACTIVE:
         return DeterministicPlacementEngine(optimization_config=PlacementOptimizationConfig(mode="off"))
@@ -166,17 +204,11 @@ def render_pipeline(
 ) -> dict[str, Any]:
     quality_mode = normalized_quality(quality)
     effective_layout_text = layout_json(layout_override) if layout_override is not None else canonical_layout_text(layout_text)
-    lookup_key = render_cache_key(text, filename, effective_layout_text, quality_mode) if effective_layout_text is not None else None
-    if use_cache and lookup_key and CURRENT_RENDER_CACHE.get("key") == lookup_key:
-        context = CURRENT_RENDER_CACHE["context"]
-        if isinstance(context, dict):
-            context["cache_hit"] = True
-            metrics = context.get("metrics", {})
-            if isinstance(metrics, dict):
-                timing = metrics.get("timing", {})
-                if isinstance(timing, dict):
-                    timing["cache_hit"] = True
-            return context
+    lookup_key = render_cache_key(text, filename, effective_layout_text or "", quality_mode)
+    if use_cache:
+        context = cached_render_context(lookup_key)
+        if context is not None:
+            return mark_cache_hit(context)
 
     total_start = perf_counter()
     lib = library()
@@ -225,7 +257,7 @@ def render_pipeline(
                 for warning in route.warnings:
                     diagnostics.append(Diagnostic(severity=Severity.WARNING, code="ROUTING_WARNING", message=warning, net_name=route.name))
             scene_start = perf_counter()
-            scene = build_schematic_scene(circuit, lib, layout, routes)
+            scene = build_schematic_scene(circuit, lib, layout, routes, quality=quality_mode)
             scene_time_ms = (perf_counter() - scene_start) * 1000
             drc_start = perf_counter()
             drc_findings, drc_metrics = visual_drc_from_scene(scene)
@@ -248,6 +280,10 @@ def render_pipeline(
         "svg_time_ms": round(render_time_ms, 3),
         "total_render_time_ms": round((perf_counter() - total_start) * 1000, 3),
     }
+    if scene is not None:
+        scene_timing = scene.metadata.get("timing", {})
+        if isinstance(scene_timing, dict):
+            timing.update(scene_timing)
     metrics = {**drc_metrics, "timing": timing, "quality_mode": quality_mode.value}
     context = {
         "library": lib,
@@ -269,11 +305,13 @@ def render_pipeline(
         "quality_mode": quality_mode,
         "cache_hit": False,
     }
-    final_layout_text = layout.model_dump_json() if circuit is not None else effective_layout_text
-    store_key = render_cache_key(text, filename, final_layout_text, quality_mode) if final_layout_text is not None else lookup_key
-    if use_cache and store_key:
-        CURRENT_RENDER_CACHE["key"] = store_key
-        CURRENT_RENDER_CACHE["context"] = context
+    final_layout_text = layout.model_dump_json() if circuit is not None else (effective_layout_text or "")
+    store_key = render_cache_key(text, filename, final_layout_text, quality_mode)
+    if use_cache:
+        store_keys = [lookup_key]
+        if store_key != lookup_key:
+            store_keys.append(store_key)
+        store_render_context(store_keys, context)
     return context
 
 
@@ -366,7 +404,20 @@ def render_loaded_circuit(
         CURRENT_STATE.expected_codes = expected_codes
         CURRENT_STATE.actual_codes = response["expected"]["actual_codes"]
         CURRENT_STATE.expected_match = response["expected"]["match"]
+    elif success:
+        remember_generated_layout(context, layout_text, None)
     return response
+
+
+def remember_generated_layout(context: dict[str, Any], incoming_layout_text: str | None, layout_override: Layout | None) -> None:
+    if layout_override is not None or incoming_layout_text or CURRENT_STATE.layout_dirty:
+        return
+    circuit = context.get("circuit")
+    layout = context.get("layout")
+    if circuit is None or not isinstance(layout, Layout):
+        return
+    CURRENT_STATE.layout_text = layout.model_dump_json(indent=2)
+    CURRENT_STATE.layout_dirty = False
 
 
 def parse_layout_text(layout_text: str | None) -> Layout | None:
@@ -500,14 +551,17 @@ def current_scene_payload(quality: RenderQualityMode | str = RenderQualityMode.I
 def current_render_context(layout_override: Layout | None = None, quality: RenderQualityMode | str = RenderQualityMode.INTERACTIVE) -> dict[str, Any]:
     source_text = CURRENT_STATE.source_text or (EXAMPLE_NETLIST.read_text(encoding="utf-8") if EXAMPLE_NETLIST.exists() else "")
     source_filename = CURRENT_STATE.source_filename or str(EXAMPLE_NETLIST)
-    return render_pipeline(
+    layout_text = CURRENT_STATE.layout_text
+    context = render_pipeline(
         source_text,
         source_filename,
-        CURRENT_STATE.layout_text,
+        layout_text,
         layout_override=layout_override,
         quality=quality,
         use_cache=layout_override is None,
     )
+    remember_generated_layout(context, layout_text, layout_override)
+    return context
 
 
 def component_detail_payload(ref: str, context: dict[str, Any]) -> dict[str, Any]:
