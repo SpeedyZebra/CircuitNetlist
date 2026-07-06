@@ -49,16 +49,20 @@ def _render_group(group: SceneElement, children: list[SceneElement]) -> str:
             "id": group.id,
             "class": "component",
             "data-ref": group.component_ref,
+            "data-component-ref": group.component_ref,
             "data-component-id": group.component_id,
             "data-category": group.metadata.get("category"),
             "data-orientation": "vertical" if int(group.metadata.get("rotation", 0)) % 180 == 90 else "horizontal",
             "data-placement-x": group.metadata.get("placement", {}).get("x"),
             "data-placement-y": group.metadata.get("placement", {}).get("y"),
+            "data-selectable": str(group.selectable).lower(),
         }
         parts = [f"<g{_attrs(group, attrs)}>"]
         hit = group.active_hit_bounds()
         parts.append(
-            f'<rect class="hit-area" x="{_num(hit.min_x)}" y="{_num(hit.min_y)}" width="{_num(hit.width)}" height="{_num(hit.height)}"/>'
+            f'<rect class="hit-area" data-owner-id="{escape(group.id)}" data-kind="component_group" data-selectable="{str(group.selectable).lower()}" '
+            f'data-ref="{escape(str(group.component_ref or ""))}" data-component-ref="{escape(str(group.component_ref or ""))}" '
+            f'data-component-id="{escape(str(group.component_id or ""))}" x="{_num(hit.min_x)}" y="{_num(hit.min_y)}" width="{_num(hit.width)}" height="{_num(hit.height)}"/>'
         )
         for child in sorted(children, key=lambda item: item.z_index):
             parts.append(_render_element(child))

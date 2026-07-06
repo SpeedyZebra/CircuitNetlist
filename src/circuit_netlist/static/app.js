@@ -132,7 +132,7 @@ function bindSvg() {
   svg.addEventListener("pointermove", onPointerMove);
   svg.addEventListener("pointerup", onPointerUp);
   svg.addEventListener("pointerleave", onPointerUp);
-  svg.querySelectorAll("[data-scene-id][data-selectable='true']").forEach(el => el.addEventListener("click", selectSceneElement));
+  svg.addEventListener("click", onSvgClick);
   svg.querySelectorAll("[data-kind='pin']").forEach(el => {
     el.addEventListener("mouseenter", () => statusEl.textContent = `${el.dataset.ref}.${el.dataset.pinName} ${el.dataset.electricalType}`);
   });
@@ -256,34 +256,86 @@ function onPointerMove(evt) {
   statusEl.textContent = `${state.drag.ref} ${nx}, ${ny}`;
 }
 
-function onPointerUp() {
-  if (state.drag?.type === "component" && state.drag.active) {
-    state.suppressClick = true;
-    setTimeout(() => state.suppressClick = false, 0);
-  }
-  releasePointer(state.drag?.captureTarget, state.drag?.pointerId);
+function onPointerUp(evt = {}) {
+  const drag = state.drag;
+  if (!drag) return;
+  releasePointer(drag.captureTarget, drag.pointerId);
   state.drag = null;
+  if (drag.type === "component" && !drag.active && !drag.moved && evt.type === "pointerup") {
+    suppressNextClick();
+    selectComponentByRef(drag.ref);
+    return;
+  }
+  if (drag.type === "component" && drag.active) {
+    suppressNextClick();
+  }
+}
+
+function suppressNextClick() {
+  state.suppressClick = true;
+  setTimeout(() => state.suppressClick = false, 120);
+}
+
+function onSvgClick(evt) {
+  if (state.suppressClick) {
+    evt.preventDefault();
+    return;
+  }
+  const target = semanticSelectionTarget(evt.target);
+  if (!target) return;
+  evt.stopPropagation();
+  selectResolvedTarget(target.el, target.sceneElement);
 }
 
 function selectSceneElement(evt) {
-  evt.stopPropagation();
   if (state.suppressClick) return;
-  const el = evt.currentTarget.closest("[data-scene-id]") || evt.currentTarget;
-  const sceneElement = state.sceneById.get(el.dataset.sceneId) || {};
-  if (sceneElement.kind === "pin") return selectPinElement(el, sceneElement);
+  const target = semanticSelectionTarget(evt.currentTarget || evt.target);
+  if (!target) return;
+  evt.stopPropagation();
+  selectResolvedTarget(target.el, target.sceneElement);
+}
+
+function selectResolvedTarget(el, sceneElement = {}) {
+  if (sceneElement.kind === "pin" || el.dataset.kind === "pin") return selectPinElement(el, sceneElement);
   if (sceneElement.net_name || el.dataset.net) return selectNetElement(el, sceneElement);
-  if (sceneElement.component_ref || el.dataset.ref) return selectComponentElement(el, sceneElement);
+  const componentRef = sceneElement.component_ref || el.dataset.componentRef || el.dataset.ref || el.closest?.(".component")?.dataset.ref;
+  if (componentRef) return selectComponentByRef(componentRef);
+}
+
+function semanticSelectionTarget(target) {
+  const pin = target.closest?.("[data-kind='pin']");
+  if (pin) return { el: pin, sceneElement: sceneElementForElement(pin) || {} };
+  const net = target.closest?.("[data-net], [data-kind='wire'], [data-kind='wire_stub'], [data-kind='junction'], [data-kind='net_label'], [data-kind='net_label_endpoint'], [data-kind='power_symbol'], [data-kind='ground_symbol'], [data-kind='power_label'], [data-kind='ground_label']");
+  if (net && (net.dataset.net || sceneElementForElement(net)?.net_name)) return { el: net, sceneElement: sceneElementForElement(net) || {} };
+  const component = target.closest?.("[data-kind='component_group'], .component, [data-component-ref]");
+  if (component) {
+    const group = component.closest?.("[data-kind='component_group'], .component") || component;
+    return { el: group, sceneElement: sceneElementForElement(group) || {} };
+  }
+  return null;
+}
+
+function sceneElementForElement(el) {
+  const semantic = el.closest?.("[data-scene-id]");
+  return semantic ? state.sceneById.get(semantic.dataset.sceneId) || null : null;
+}
+
+async function selectComponentByRef(ref) {
+  const group = document.querySelector(`#component-${cssSafe(ref)}`);
+  const sceneElement = group ? sceneElementForElement(group) || {} : {};
+  await selectComponentElement(group || { dataset: { ref } }, { ...sceneElement, component_ref: ref });
 }
 
 async function selectComponentElement(el, sceneElement = {}) {
   clearSelection();
-  const ref = sceneElement.component_ref || el.dataset.ref;
+  const ref = sceneElement.component_ref || el.dataset.componentRef || el.dataset.ref;
   document.querySelector(`#component-${cssSafe(ref)}`)?.classList.add("selected");
   state.selected = sceneElement.id || el.dataset.sceneId || ref;
   document.querySelector("#properties").innerHTML = rows({ Reference: ref, Status: "Loading component details..." });
   try {
     const detail = await fetchJson(`/api/circuit/component-details/${encodeURIComponent(ref)}?t=${Date.now()}`, { cache: "no-store" });
     renderComponentDetails(detail);
+    statusEl.textContent = `Selected component ${ref}`;
   } catch (err) {
     const comp = state.circuit.components.find(c => c.ref === ref) || {};
     document.querySelector("#properties").innerHTML = rows({ Reference: comp.ref || ref, Type: comp.component_id || "", Status: err.message });
@@ -291,18 +343,22 @@ async function selectComponentElement(el, sceneElement = {}) {
 }
 
 function selectPinElement(el, sceneElement = {}) {
+  clearSelection();
   const p = el.dataset;
   const ref = sceneElement.component_ref || p.ref;
   const pinName = sceneElement.pin_name || p.pinName;
   const pinNumber = sceneElement.pin_number || p.pinNumber;
+  state.selected = sceneElement.id || el.dataset.sceneId || `${ref}.${pinName || pinNumber}`;
   document.querySelector("#properties").innerHTML = rows({ Component: ref, Pin: `${pinNumber} ${pinName}`, Type: p.electricalType || "", Net: findPinNet(ref, pinName) || "" });
 }
 
 async function selectNetElement(el, sceneElement = {}) {
+  clearSelection();
   const net = sceneElement.net_name || el.dataset.net || el.closest("[data-net]")?.dataset.net;
   const group = document.querySelector(`#net-${cssSafe(net)}`);
   const style = group?.dataset.renderStyle || "local_wire";
   document.querySelectorAll(".net").forEach(n => n.classList.toggle("highlight", n.dataset.net === net));
+  state.selected = sceneElement.id || el.dataset.sceneId || net;
   document.querySelector("#properties").innerHTML = rows({ Net: net, "Render style": style, Status: "Loading net details..." });
   try {
     const detail = await fetchJson(`/api/circuit/net-details/${encodeURIComponent(net)}?t=${Date.now()}`, { cache: "no-store" });
@@ -320,20 +376,23 @@ function findPinNet(ref, pinName) {
 }
 
 function rows(obj) {
-  return Object.entries(obj).map(([k, v]) => `<div class="prop-row"><strong>${k}</strong><br>${String(v ?? "")}</div>`).join("");
+  return Object.entries(obj).map(([k, v]) => `<div class="prop-row"><strong>${escapeHtml(k)}</strong><br>${escapeHtml(v ?? "")}</div>`).join("");
 }
 
 function renderComponentDetails(detail) {
-  const params = Object.entries(detail.parameters || {}).map(([key, value]) => `${escapeHtml(key)}=${escapeHtml(value)}`).join(", ") || "none";
-  const patterns = (detail.topology_patterns || []).map(pattern => escapeHtml(pattern.type)).join(", ") || "none";
-  const brief = [detail.summary, detail.function, detail.common_use].filter(Boolean).map(escapeHtml).join("<br>");
+  const params = Object.entries(detail.parameters || {}).map(([key, value]) => `${key}=${value}`).join(", ") || "none";
+  const patterns = (detail.topology_patterns || []).map(pattern => pattern.type).join(", ") || "none";
   const notes = [detail.notes, detail.warnings].filter(Boolean).map(escapeHtml).join("<br>");
   document.querySelector("#properties").innerHTML = `
     <div class="prop-title">${escapeHtml(detail.ref)} ${escapeHtml(detail.name || detail.component_id)}</div>
-    ${brief ? `<div class="prop-row">${brief}</div>` : ""}
     ${rows({
+      Reference: detail.ref,
       "Component ID": detail.component_id,
+      "Human name": detail.name || "",
       Category: detail.category,
+      Summary: detail.summary || "",
+      Function: detail.function || "",
+      "Common use": detail.common_use || "",
       Value: detail.value || "",
       Role: detail.role || "",
       Package: detail.package || "",
@@ -410,6 +469,7 @@ async function changeNetRouteStyle(net, routeStyle) {
 
 function clearSelection() {
   document.querySelectorAll(".component.selected").forEach(e => e.classList.remove("selected"));
+  document.querySelectorAll(".net.highlight").forEach(e => e.classList.remove("highlight"));
 }
 
 function indexScene(scene) {

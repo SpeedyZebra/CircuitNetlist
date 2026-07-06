@@ -336,3 +336,26 @@ Still intentionally limited to EC-1 scope:
 - No SPICE export, DC solver, simulation engine, solar/weather simulation, or battery simulation.
 - Rendered connectivity validates the canonical scene after routing; it does not choose placements or routes.
 - Playwright execution remains deferred.
+
+## Milestone UI-1 - reliable component selection and details panel
+
+Status: complete
+
+Implemented in this branch:
+
+- Component SVG groups now include selectable scene metadata, component reference metadata, and component ID metadata.
+- Transparent component hit areas now carry component selection metadata so they are not dead click targets.
+- SVG selection now uses delegated click handling from the root schematic SVG.
+- Selection priority is pin, then net/wire/label/symbol, then component group/body/symbol/hit-area/text.
+- Component pointer-up without movement selects the stored component reference directly, covering the pointer-capture click case.
+- Drag release after real movement suppresses the follow-up click so dragging does not accidentally refetch details.
+- Basic passive symbols remain selectable through their component group and hit area.
+- The properties panel now displays explicit component fields: reference, component ID, human name, summary, function, common use, value, role, package, orientation, metadata status, topology role/patterns, and a pin table.
+- Source-level tests cover SVG metadata, hit-area metadata, delegated click handling, pointer-up selection, pin/net path preservation, and representative IC/passive details payloads.
+- Documentation in `docs/component_selection_and_details.md`.
+
+Still intentionally limited to UI-1 scope:
+
+- No Playwright execution or browser-test expansion in this milestone.
+- No simulation engine.
+- No routing, placement, or component-library architecture changes.

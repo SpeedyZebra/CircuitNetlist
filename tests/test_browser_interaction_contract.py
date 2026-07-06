@@ -16,7 +16,7 @@ def test_component_drag_uses_threshold_and_click_suppression() -> None:
     assert "active: false" in source
     assert "pixelDistance < DRAG_THRESHOLD_PX" in source
     assert "state.suppressClick = true" in source
-    assert "if (state.suppressClick) return;" in source
+    assert "if (state.suppressClick)" in source
 
 
 def test_component_drag_formula_is_cumulative_from_scene_origin() -> None:
@@ -35,7 +35,27 @@ def test_component_drag_formula_is_cumulative_from_scene_origin() -> None:
     assert "Number.isFinite(ny)" in source
     assert "readTranslate(component)" in source
     assert "capturePointer(svg, evt.pointerId)" in source
-    assert "releasePointer(state.drag?.captureTarget, state.drag?.pointerId)" in source
+    assert "releasePointer(drag.captureTarget, drag.pointerId)" in source
+
+
+def test_component_click_without_drag_selects_from_pointerup() -> None:
+    source = app_js()
+    assert "function onPointerUp(evt = {})" in source
+    assert "drag.type === \"component\" && !drag.active && !drag.moved && evt.type === \"pointerup\"" in source
+    assert "selectComponentByRef(drag.ref)" in source
+    assert "suppressNextClick()" in source
+
+
+def test_svg_uses_delegated_selection_handler() -> None:
+    source = app_js()
+    assert "svg.addEventListener(\"click\", onSvgClick)" in source
+    assert "function onSvgClick(evt)" in source
+    assert "function semanticSelectionTarget(target)" in source
+    assert "function selectResolvedTarget(el, sceneElement = {})" in source
+    assert "function selectComponentByRef(ref)" in source
+    assert "[data-kind='pin']" in source
+    assert "[data-net], [data-kind='wire']" in source
+    assert "[data-kind='component_group'], .component, [data-component-ref]" in source
 
 
 def test_child_scene_elements_do_not_start_component_drag() -> None:
