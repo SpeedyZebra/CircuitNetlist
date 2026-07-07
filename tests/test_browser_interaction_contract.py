@@ -42,7 +42,7 @@ def test_component_click_without_drag_selects_from_pointerup() -> None:
     source = app_js()
     assert "function onPointerUp(evt = {})" in source
     assert "drag.type === \"component\" && !drag.active && !drag.moved && evt.type === \"pointerup\"" in source
-    assert "selectComponentByRef(drag.ref)" in source
+    assert "selectComponentByRef(drag.ref, { source: \"pointerup\" })" in source
     assert "suppressNextClick()" in source
 
 
@@ -50,12 +50,29 @@ def test_svg_uses_delegated_selection_handler() -> None:
     source = app_js()
     assert "svg.addEventListener(\"click\", onSvgClick)" in source
     assert "function onSvgClick(evt)" in source
-    assert "function semanticSelectionTarget(target)" in source
+    assert "function semanticSelectionTarget(evt)" in source
+    assert "evt.composedPath" in source
+    assert "function componentRefFromEvent(evt)" in source
+    assert "function componentRefFromElement(el)" in source
     assert "function selectResolvedTarget(el, sceneElement = {})" in source
-    assert "function selectComponentByRef(ref)" in source
+    assert "async function selectComponentByRef(ref, options = {})" in source
     assert "[data-kind='pin']" in source
-    assert "[data-net], [data-kind='wire']" in source
-    assert "[data-kind='component_group'], .component, [data-component-ref]" in source
+    assert "NET_SELECTION_KINDS" in source
+    assert "[data-kind='component_group'], .component" in source
+
+
+def test_component_selection_updates_visible_debug_state() -> None:
+    source = app_js()
+    assert "Clicked component" in source
+    assert "Clicked net" in source
+    assert "Clicked pin" in source
+    assert "Click ignored: no selectable target" in source
+    assert "Component details request failed for" in source
+    assert "lastClick" in source
+    assert "lastSelection" in source
+    assert "lastPropertiesHtml" in source
+    assert "recordLastClick" in source
+    assert "setPropertiesHtml" in source
 
 
 def test_child_scene_elements_do_not_start_component_drag() -> None:

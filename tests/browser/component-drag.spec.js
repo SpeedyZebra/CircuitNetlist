@@ -12,6 +12,40 @@ test.beforeEach(async ({ page }) => {
   await waitForSchematic(page);
 });
 
+test("component clicks update properties panel and browser debug state", async ({ page }) => {
+  await clickComponent(page, "BAT1");
+
+  await expect(page.locator("#properties")).toContainText("BAT1");
+  await expect(page.locator("#properties")).toContainText("Pins");
+  await expect(page.locator("#status")).toContainText(/Clicked component BAT1|Selected component BAT1 from pointerup/);
+
+  const clickDebug = await page.evaluate(() => ({
+    lastClick: window.__circuitNetlistDebug.lastClick,
+    lastSelection: window.__circuitNetlistDebug.lastSelection,
+    lastPropertiesHtml: window.__circuitNetlistDebug.lastPropertiesHtml
+  }));
+  expect(clickDebug.lastClick?.resolvedSelectionType).toBe("component");
+  expect(clickDebug.lastClick?.resolvedComponentRef).toBe("BAT1");
+  expect(clickDebug.lastClick?.propertiesUpdated).toBe(true);
+  expect(clickDebug.lastSelection?.type).toBe("component");
+  expect(clickDebug.lastSelection?.componentRef).toBe("BAT1");
+  expect(clickDebug.lastPropertiesHtml).toContain("BAT1");
+
+  await page.locator("#component-CHG1 .hit-area").click({ position: { x: 8, y: 8 } });
+  await expect(page.locator("#properties")).toContainText("CHG1");
+  await expect(page.locator("#properties")).toContainText("Pins");
+
+  await page.evaluate(() => window.__circuitNetlistDebug.selectComponentByRef("U1"));
+  await expect(page.locator("#properties")).toContainText("U1");
+  await expect(page.locator("#properties")).toContainText("Pins");
+  await expect(page.locator("#status")).toContainText("Selected component U1 from debug hook");
+
+  const hookDebug = await page.evaluate(() => window.__circuitNetlistDebug.lastSelection);
+  expect(hookDebug?.type).toBe("component");
+  expect(hookDebug?.componentRef).toBe("U1");
+  expect(hookDebug?.detailLoaded).toBe(true);
+});
+
 test("battery click and below-threshold movement do not move it", async ({ page }, testInfo) => {
   const before = await snapshot(page, "BAT1");
   await clickComponent(page, "BAT1");

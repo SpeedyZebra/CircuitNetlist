@@ -79,6 +79,22 @@ h2 { margin: 0 0 10px; font-size: 14px; color: var(--muted); font-weight: 600; }
   color: var(--accent);
   font-weight: 700;
 }
+.debug-select {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 6px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid #263240;
+  margin-bottom: 6px;
+}
+.debug-select label {
+  grid-column: 1 / -1;
+  color: var(--muted);
+  font-size: 12px;
+}
+.debug-select input {
+  min-width: 0;
+}
 .pin-table {
   width: 100%;
   border-collapse: collapse;

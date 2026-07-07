@@ -68,6 +68,8 @@ def test_frontend_component_selection_source_paths_are_present() -> None:
     source = APP_JS.read_text(encoding="utf-8")
     assert 'svg.addEventListener("click", onSvgClick)' in source
     assert "semanticSelectionTarget" in source
+    assert "componentRefFromEvent" in source
+    assert "evt.composedPath" in source
     assert "selectComponentByRef" in source
     assert "selectPinElement" in source
     assert "selectNetElement" in source
@@ -75,6 +77,9 @@ def test_frontend_component_selection_source_paths_are_present() -> None:
     assert "/api/circuit/net-details/" in source
     assert "route-style-select" in source
     assert "drag.type === \"component\" && !drag.active && !drag.moved" in source
+    assert "window.__circuitNetlistDebug" in source
+    assert "selectComponentByRef: ref => selectComponentByRef(ref, { source: \"debug\" })" in source
+    assert "debug-show-component" in source
 
 
 def test_component_details_api_returns_555_and_attiny_pin_descriptions() -> None:
@@ -118,3 +123,10 @@ def test_component_details_panel_has_no_duplicate_orientation_row() -> None:
     assert source.count("Orientation: detail.orientation") == 1
     assert "Human name" in source
     assert "Common use" in source
+
+
+def test_index_exposes_manual_component_details_debug_control() -> None:
+    html = (ROOT / "src" / "circuit_netlist" / "static" / "index.html").read_text(encoding="utf-8")
+    assert 'id="debug-component-ref"' in html
+    assert 'id="debug-show-component"' in html
+    assert "Show Details" in html

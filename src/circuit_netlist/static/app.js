@@ -1,5 +1,7 @@
 const DRAG_THRESHOLD_PX = 5;
 const NON_COMPONENT_DRAG_KINDS = new Set(["pin", "wire", "wire_stub", "junction", "net_label", "net_label_endpoint", "power_symbol", "ground_symbol", "power_label", "ground_label"]);
+const NET_SELECTION_KINDS = new Set(["wire", "wire_stub", "junction", "net_label", "net_label_endpoint", "power_symbol", "ground_symbol", "power_label", "ground_label"]);
+const debugState = { lastClick: null, lastSelection: null, lastPropertiesHtml: "" };
 let state = { circuit: null, layout: null, scene: null, sceneById: new Map(), components: [], svg: "", scale: 1, panX: 0, panY: 0, selected: null, drag: null, suppressClick: false, current: null, catalog: null, expected: null, localFile: null, localLayoutFile: null };
 const canvas = document.querySelector("#canvas");
 const statusEl = document.querySelector("#status");
@@ -263,7 +265,8 @@ function onPointerUp(evt = {}) {
   state.drag = null;
   if (drag.type === "component" && !drag.active && !drag.moved && evt.type === "pointerup") {
     suppressNextClick();
-    selectComponentByRef(drag.ref);
+    recordLastClick(evt, { selectionType: "component", componentRef: drag.ref, source: "pointerup" });
+    selectComponentByRef(drag.ref, { source: "pointerup" });
     return;
   }
   if (drag.type === "component" && drag.active) {
@@ -281,37 +284,90 @@ function onSvgClick(evt) {
     evt.preventDefault();
     return;
   }
-  const target = semanticSelectionTarget(evt.target);
-  if (!target) return;
+  const target = semanticSelectionTarget(evt);
+  if (!target) {
+    recordLastClick(evt, { selectionType: "ignored", reason: "no selectable target" });
+    statusEl.textContent = "Click ignored: no selectable target";
+    return;
+  }
   evt.stopPropagation();
+  recordLastClick(evt, target);
   selectResolvedTarget(target.el, target.sceneElement);
 }
 
 function selectSceneElement(evt) {
   if (state.suppressClick) return;
-  const target = semanticSelectionTarget(evt.currentTarget || evt.target);
+  const target = semanticSelectionTarget(evt);
   if (!target) return;
   evt.stopPropagation();
+  recordLastClick(evt, target);
   selectResolvedTarget(target.el, target.sceneElement);
 }
 
 function selectResolvedTarget(el, sceneElement = {}) {
   if (sceneElement.kind === "pin" || el.dataset.kind === "pin") return selectPinElement(el, sceneElement);
   if (sceneElement.net_name || el.dataset.net) return selectNetElement(el, sceneElement);
-  const componentRef = sceneElement.component_ref || el.dataset.componentRef || el.dataset.ref || el.closest?.(".component")?.dataset.ref;
-  if (componentRef) return selectComponentByRef(componentRef);
+  const componentRef = sceneElement.component_ref || el.dataset.componentRef || el.dataset.ref || el.closest?.(".component")?.dataset.ref || componentRefFromElement(el);
+  if (componentRef) return selectComponentByRef(componentRef, { source: "click" });
+  statusEl.textContent = "Click ignored: no selectable target";
 }
 
-function semanticSelectionTarget(target) {
-  const pin = target.closest?.("[data-kind='pin']");
-  if (pin) return { el: pin, sceneElement: sceneElementForElement(pin) || {} };
-  const net = target.closest?.("[data-net], [data-kind='wire'], [data-kind='wire_stub'], [data-kind='junction'], [data-kind='net_label'], [data-kind='net_label_endpoint'], [data-kind='power_symbol'], [data-kind='ground_symbol'], [data-kind='power_label'], [data-kind='ground_label']");
-  if (net && (net.dataset.net || sceneElementForElement(net)?.net_name)) return { el: net, sceneElement: sceneElementForElement(net) || {} };
-  const component = target.closest?.("[data-kind='component_group'], .component, [data-component-ref]");
-  if (component) {
-    const group = component.closest?.("[data-kind='component_group'], .component") || component;
-    return { el: group, sceneElement: sceneElementForElement(group) || {} };
+function semanticSelectionTarget(evt) {
+  const path = eventPath(evt);
+  const pin = firstPathElement(path, item => item.dataset?.kind === "pin" || item.closest?.("[data-kind='pin']"));
+  if (pin) {
+    const element = pin.dataset?.kind === "pin" ? pin : pin.closest("[data-kind='pin']");
+    return { el: element, sceneElement: sceneElementForElement(element) || {}, selectionType: "pin" };
   }
+  const net = firstPathElement(path, item => item.dataset?.net || NET_SELECTION_KINDS.has(item.dataset?.kind) || item.closest?.("[data-net]"));
+  if (net) {
+    const element = net.dataset?.net || NET_SELECTION_KINDS.has(net.dataset?.kind) ? net : net.closest("[data-net]");
+    const sceneElement = sceneElementForElement(element) || {};
+    if (element?.dataset?.net || sceneElement.net_name) return { el: element, sceneElement, selectionType: "net", netName: element.dataset.net || sceneElement.net_name };
+  }
+  const componentRef = componentRefFromEvent(evt);
+  if (componentRef) {
+    const group = document.querySelector(`#component-${cssSafe(componentRef)}`) || firstPathElement(path, item => item.dataset?.componentRef || item.dataset?.ref || item.classList?.contains("component"));
+    return { el: group || evt.target, sceneElement: sceneElementForElement(group) || {}, selectionType: "component", componentRef };
+  }
+  return null;
+}
+
+function eventPath(evt) {
+  const path = typeof evt.composedPath === "function" ? evt.composedPath() : [];
+  if (path.length) return path;
+  const fallback = [];
+  let node = evt.target;
+  while (node) {
+    fallback.push(node);
+    node = node.parentNode;
+  }
+  return fallback;
+}
+
+function firstPathElement(path, predicate) {
+  return path.find(item => item && item.nodeType === 1 && predicate(item)) || null;
+}
+
+function componentRefFromEvent(evt) {
+  for (const item of eventPath(evt)) {
+    if (!item?.dataset) continue;
+    if (item.dataset.componentRef) return item.dataset.componentRef;
+    if (item.dataset.ref && (item.classList?.contains("component") || item.closest?.(".component"))) return item.dataset.ref;
+    const fromElement = componentRefFromElement(item);
+    if (fromElement) return fromElement;
+  }
+  return componentRefFromElement(evt.target);
+}
+
+function componentRefFromElement(el) {
+  if (!el) return null;
+  if (el.dataset?.componentRef) return el.dataset.componentRef;
+  if (el.dataset?.ref && (el.classList?.contains("component") || el.closest?.(".component"))) return el.dataset.ref;
+  const group = el.closest?.(".component, [data-kind='component_group']");
+  if (group?.dataset?.componentRef || group?.dataset?.ref) return group.dataset.componentRef || group.dataset.ref;
+  const idGroup = el.closest?.(".component[id^='component-'], [data-kind='component_group'][id^='component-']");
+  if (idGroup?.id) return idGroup.id.replace(/^component-/, "");
   return null;
 }
 
@@ -320,25 +376,43 @@ function sceneElementForElement(el) {
   return semantic ? state.sceneById.get(semantic.dataset.sceneId) || null : null;
 }
 
-async function selectComponentByRef(ref) {
+async function selectComponentByRef(ref, options = {}) {
+  if (!ref) {
+    statusEl.textContent = "Click ignored: no selectable target";
+    updateDebugState({ lastSelection: { type: "ignored", reason: "missing component ref", propertiesUpdated: false } });
+    return;
+  }
   const group = document.querySelector(`#component-${cssSafe(ref)}`);
   const sceneElement = group ? sceneElementForElement(group) || {} : {};
-  await selectComponentElement(group || { dataset: { ref } }, { ...sceneElement, component_ref: ref });
+  await selectComponentElement(group || { dataset: { ref } }, { ...sceneElement, component_ref: ref }, options);
 }
 
-async function selectComponentElement(el, sceneElement = {}) {
+async function selectComponentElement(el, sceneElement = {}, options = {}) {
   clearSelection();
   const ref = sceneElement.component_ref || el.dataset.componentRef || el.dataset.ref;
+  const source = options.source || "click";
+  const initialStatus = source === "pointerup" ? `Selected component ${ref} from pointerup` : source === "debug" ? `Selected component ${ref} from debug hook` : `Clicked component ${ref}`;
   document.querySelector(`#component-${cssSafe(ref)}`)?.classList.add("selected");
   state.selected = sceneElement.id || el.dataset.sceneId || ref;
-  document.querySelector("#properties").innerHTML = rows({ Reference: ref, Status: "Loading component details..." });
+  const propertiesUpdated = setPropertiesHtml(`
+    <div class="prop-title">Selected component ${escapeHtml(ref)}</div>
+    ${rows({ Reference: ref, Status: "Loading details..." })}
+  `);
+  statusEl.textContent = initialStatus;
+  updateSelectionDebug({ type: "component", componentRef: ref, source, propertiesUpdated });
   try {
     const detail = await fetchJson(`/api/circuit/component-details/${encodeURIComponent(ref)}?t=${Date.now()}`, { cache: "no-store" });
     renderComponentDetails(detail);
-    statusEl.textContent = `Selected component ${ref}`;
+    statusEl.textContent = initialStatus;
+    updateSelectionDebug({ type: "component", componentRef: ref, source, propertiesUpdated: true, detailLoaded: true });
   } catch (err) {
     const comp = state.circuit.components.find(c => c.ref === ref) || {};
-    document.querySelector("#properties").innerHTML = rows({ Reference: comp.ref || ref, Type: comp.component_id || "", Status: err.message });
+    setPropertiesHtml(`
+      <div class="prop-title">Selected component ${escapeHtml(comp.ref || ref)}</div>
+      ${rows({ Reference: comp.ref || ref, Type: comp.component_id || "", Status: `Details request failed: ${err.message}` })}
+    `);
+    statusEl.textContent = `Component details request failed for ${ref}: ${err.message}`;
+    updateSelectionDebug({ type: "component", componentRef: ref, source, propertiesUpdated: true, detailLoaded: false, error: err.message });
   }
 }
 
@@ -349,7 +423,9 @@ function selectPinElement(el, sceneElement = {}) {
   const pinName = sceneElement.pin_name || p.pinName;
   const pinNumber = sceneElement.pin_number || p.pinNumber;
   state.selected = sceneElement.id || el.dataset.sceneId || `${ref}.${pinName || pinNumber}`;
-  document.querySelector("#properties").innerHTML = rows({ Component: ref, Pin: `${pinNumber} ${pinName}`, Type: p.electricalType || "", Net: findPinNet(ref, pinName) || "" });
+  const propertiesUpdated = setPropertiesHtml(rows({ Component: ref, Pin: `${pinNumber} ${pinName}`, Type: p.electricalType || "", Net: findPinNet(ref, pinName) || "" }));
+  statusEl.textContent = `Clicked pin ${ref}.${pinName || pinNumber}`;
+  updateSelectionDebug({ type: "pin", componentRef: ref, pinName, pinNumber, propertiesUpdated });
 }
 
 async function selectNetElement(el, sceneElement = {}) {
@@ -359,14 +435,16 @@ async function selectNetElement(el, sceneElement = {}) {
   const style = group?.dataset.renderStyle || "local_wire";
   document.querySelectorAll(".net").forEach(n => n.classList.toggle("highlight", n.dataset.net === net));
   state.selected = sceneElement.id || el.dataset.sceneId || net;
-  document.querySelector("#properties").innerHTML = rows({ Net: net, "Render style": style, Status: "Loading net details..." });
+  const propertiesUpdated = setPropertiesHtml(rows({ Net: net, "Render style": style, Status: "Loading net details..." }));
+  statusEl.textContent = `Clicked net ${net}`;
+  updateSelectionDebug({ type: "net", netName: net, propertiesUpdated });
   try {
     const detail = await fetchJson(`/api/circuit/net-details/${encodeURIComponent(net)}?t=${Date.now()}`, { cache: "no-store" });
     renderNetDetails(detail);
   } catch (err) {
-    document.querySelector("#properties").innerHTML = rows({ Net: net, "Render style": style, Status: err.message });
+    setPropertiesHtml(rows({ Net: net, "Render style": style, Status: err.message }));
   }
-  statusEl.textContent = `Selected net ${net}`;
+  statusEl.textContent = `Clicked net ${net}`;
 }
 
 function findPinNet(ref, pinName) {
@@ -379,11 +457,58 @@ function rows(obj) {
   return Object.entries(obj).map(([k, v]) => `<div class="prop-row"><strong>${escapeHtml(k)}</strong><br>${escapeHtml(v ?? "")}</div>`).join("");
 }
 
+function setPropertiesHtml(html) {
+  const properties = document.querySelector("#properties");
+  if (!properties) return false;
+  properties.innerHTML = html;
+  const lastPropertiesHtml = properties.innerHTML;
+  const lastClick = debugState.lastClick ? { ...debugState.lastClick, propertiesUpdated: true } : null;
+  const lastSelection = debugState.lastSelection ? { ...debugState.lastSelection, propertiesUpdated: true } : debugState.lastSelection;
+  updateDebugState({ lastPropertiesHtml, lastClick, lastSelection });
+  return true;
+}
+
+function updateDebugState(fields) {
+  Object.assign(debugState, fields);
+  if (window.__circuitNetlistDebug) Object.assign(window.__circuitNetlistDebug, fields);
+}
+
+function updateSelectionDebug(selection) {
+  updateDebugState({ lastSelection: { ...selection, lastPropertiesHtml: debugState.lastPropertiesHtml } });
+}
+
+function recordLastClick(evt, resolved = {}) {
+  const raw = elementDebugInfo(evt?.target);
+  updateDebugState({
+    lastClick: {
+      ...raw,
+      resolvedSelectionType: resolved.selectionType || resolved.type || null,
+      resolvedComponentRef: resolved.componentRef || null,
+      resolvedNetName: resolved.netName || null,
+      reason: resolved.reason || "",
+      source: resolved.source || "click",
+      propertiesUpdated: false
+    }
+  });
+}
+
+function elementDebugInfo(el) {
+  const classValue = typeof el?.getAttribute === "function" ? el.getAttribute("class") : "";
+  return {
+    rawTag: el?.tagName || "",
+    rawClass: classValue || "",
+    dataKind: el?.dataset?.kind || "",
+    dataSceneId: el?.dataset?.sceneId || "",
+    dataRef: el?.dataset?.ref || "",
+    dataComponentRef: el?.dataset?.componentRef || ""
+  };
+}
+
 function renderComponentDetails(detail) {
   const params = Object.entries(detail.parameters || {}).map(([key, value]) => `${key}=${value}`).join(", ") || "none";
   const patterns = (detail.topology_patterns || []).map(pattern => pattern.type).join(", ") || "none";
   const notes = [detail.notes, detail.warnings].filter(Boolean).map(escapeHtml).join("<br>");
-  document.querySelector("#properties").innerHTML = `
+  setPropertiesHtml(`
     <div class="prop-title">${escapeHtml(detail.ref)} ${escapeHtml(detail.name || detail.component_id)}</div>
     ${rows({
       Reference: detail.ref,
@@ -404,7 +529,7 @@ function renderComponentDetails(detail) {
     })}
     ${notes ? `<div class="prop-row"><strong>Notes</strong><br>${notes}</div>` : ""}
     <div class="prop-row"><strong>Pins</strong>${pinTable(detail.pins || [])}</div>
-  `;
+  `);
 }
 
 function pinTable(pins) {
@@ -433,7 +558,7 @@ function renderNetDetails(detail) {
     ["label", "Net labels"],
     ["power_symbol", "Power symbols"]
   ];
-  document.querySelector("#properties").innerHTML = `
+  setPropertiesHtml(`
     <div class="prop-title">Net ${escapeHtml(detail.net_name)}</div>
     ${rows({
       "Endpoint count": detail.endpoint_count,
@@ -450,7 +575,7 @@ function renderNetDetails(detail) {
       </select>
     </div>
     <div class="prop-row"><strong>Endpoints</strong><br>${(detail.endpoints || []).map(endpoint => `${escapeHtml(endpoint.component_ref)}.${escapeHtml(endpoint.pin_name)}`).join("<br>")}</div>
-  `;
+  `);
   document.querySelector("#route-style-select")?.addEventListener("change", evt => changeNetRouteStyle(evt.target.dataset.net, evt.target.value));
 }
 
@@ -557,6 +682,16 @@ document.querySelector("#fit").addEventListener("click", () => {
 });
 document.querySelector("#reset").addEventListener("click", () => loadAll({ fresh: true }));
 document.querySelector("#grid-toggle").addEventListener("change", () => document.querySelector("#schematic")?.classList.toggle("grid-hidden", !document.querySelector("#grid-toggle").checked));
+document.querySelector("#debug-show-component")?.addEventListener("click", () => {
+  const ref = document.querySelector("#debug-component-ref")?.value?.trim() || "U1";
+  selectComponentByRef(ref, { source: "debug" });
+});
+document.querySelector("#debug-component-ref")?.addEventListener("keydown", evt => {
+  if (evt.key === "Enter") {
+    evt.preventDefault();
+    document.querySelector("#debug-show-component")?.click();
+  }
+});
 document.querySelector("#search").addEventListener("input", evt => {
   const q = evt.target.value.toLowerCase();
   document.querySelectorAll(".component").forEach(el => el.classList.toggle("search-hit", q && el.dataset.ref.toLowerCase().includes(q)));
@@ -565,6 +700,10 @@ document.querySelector("#search").addEventListener("input", evt => {
 
 window.__circuitNetlistDebug = {
   dragThreshold: DRAG_THRESHOLD_PX,
+  lastClick: debugState.lastClick,
+  lastSelection: debugState.lastSelection,
+  lastPropertiesHtml: debugState.lastPropertiesHtml,
+  selectComponentByRef: ref => selectComponentByRef(ref, { source: "debug" }),
   state: () => {
     const svg = document.querySelector("#schematic");
     const vb = svg?.viewBox?.baseVal;

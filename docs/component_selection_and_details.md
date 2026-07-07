@@ -29,9 +29,27 @@ The transparent `.hit-area` rectangle inside each component group carries the sa
 
 Component pointer-down still captures the pointer for stable dragging.
 
-Movement below `DRAG_THRESHOLD_PX` remains a click. On `pointerup`, if a component drag never became active, the frontend selects the stored component reference directly with `selectComponentByRef(ref)`. This avoids relying on the browser's later click event, which can be affected by pointer capture.
+Movement below `DRAG_THRESHOLD_PX` remains a click. On `pointerup`, if a component drag never became active, the frontend selects the stored component reference directly with `selectComponentByRef(ref, { source: "pointerup" })`. This avoids relying on the browser's later click event, which can be affected by pointer capture.
 
 After actual movement, the frontend suppresses the following click event briefly so drag release does not also refetch component details.
+
+## Browser Debug State
+
+Every schematic click updates the footer with a visible selection status:
+
+- `Clicked component U1`
+- `Clicked net VBAT`
+- `Clicked pin U1.PA1`
+- `Click ignored: no selectable target`
+- `Component details request failed for U1: <reason>`
+
+The browser also exposes `window.__circuitNetlistDebug.lastClick`, `lastSelection`, and `lastPropertiesHtml`. These include the raw clicked SVG tag, class, semantic data attributes, resolved selection type and reference, and whether the Properties panel was updated.
+
+For manual debugging, the Properties sidebar includes a small component-reference input and Show Details button. The same path is available from the console:
+
+```javascript
+window.__circuitNetlistDebug.selectComponentByRef("U1")
+```
 
 ## Properties Panel
 
@@ -58,9 +76,9 @@ This is especially useful for ICs and functional blocks such as the 555 timer, A
 
 ## Manual Verification
 
-Playwright execution is deferred for UI-1, so use this manual pass when checking the browser:
+Playwright covers the main component-selection path in `tests/browser/component-drag.spec.js`. Use this manual pass when checking broader browser behavior:
 
-1. Start the app with `py -3.11 run.py`.
+1. Start the app with `python run.py`.
 2. Click a 555 timer body and verify the summary and pin table appear.
 3. Click an ATtiny402 body and verify the summary and pin table appear.
 4. Click a resistor, capacitor, MOSFET, charger block, solar panel, and battery.
@@ -69,6 +87,4 @@ Playwright execution is deferred for UI-1, so use this manual pass when checking
 7. Click a wire or net label and verify net details plus the route-style dropdown still appear.
 8. Drag a component past the threshold and verify it moves without triggering an unwanted details refresh on release.
 
-## Deferred
-
-Playwright browser execution remains deferred. Simulation remains deferred.
+Simulation remains deferred.
