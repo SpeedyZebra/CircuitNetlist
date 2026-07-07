@@ -80,3 +80,51 @@ circuits:
     source_kind: regression
     topology_family: motor or relay with flyback
     purpose: Low-side NMOS relay-coil driver with flyback diode.
+  - id: 06_arduino_mosfet_pwm_good
+    name: Arduino MOSFET PWM Driver
+    path: test_circuits/good/06_arduino_mosfet_pwm/circuit.cnet
+    source_kind: regression
+    topology_family: MCU MOSFET PWM driver
+    purpose: Arduino Nano PWM output drives a low-side MOSFET load with gate resistor, pulldown, flyback diode, and rail capacitors.
+  - id: 07_esp32_i2c_sensor_good
+    name: ESP32 I2C Sensor
+    path: test_circuits/good/07_esp32_i2c_sensor/circuit.cnet
+    source_kind: regression
+    topology_family: MCU I2C sensor
+    purpose: ESP32 DevKit reads an I2C sensor module with external pullups, enable pullup, LDO regulator, and decoupling.
+  - id: 08_pico_spi_adc_good
+    name: Pico SPI ADC
+    path: test_circuits/good/08_pico_spi_adc/circuit.cnet
+    source_kind: regression
+    topology_family: MCU SPI ADC
+    purpose: Raspberry Pi Pico connects to an MCP3008-style SPI ADC measuring a filtered voltage divider.
+  - id: 09_lm358_signal_conditioning_good
+    name: LM358 Signal Conditioning
+    path: test_circuits/good/09_lm358_signal_conditioning/circuit.cnet
+    source_kind: regression
+    topology_family: op-amp signal conditioning
+    purpose: LM358-style op amp filters and amplifies a sensor signal before an MCU ADC input.
+  - id: 10_lm393_comparator_hysteresis_good
+    name: LM393 Comparator
+    path: test_circuits/good/10_lm393_comparator_hysteresis/circuit.cnet
+    source_kind: regression
+    topology_family: comparator hysteresis
+    purpose: LM393-style open-collector comparator uses reference and sensor dividers, output pullup, and feedback hysteresis.
+  - id: 11_uln2003_relay_driver_good
+    name: ULN2003 Relay Driver
+    path: test_circuits/good/11_uln2003_relay_driver/circuit.cnet
+    source_kind: regression
+    topology_family: driver array relay
+    purpose: Arduino Nano controls a ULN2003-style low-side relay driver with shared ground and flyback protection.
+  - id: 12_l293d_motor_driver_good
+    name: L293D Motor Driver
+    path: test_circuits/good/12_l293d_motor_driver/circuit.cnet
+    source_kind: regression
+    topology_family: motor driver
+    purpose: Arduino Nano drives an L293D-style H-bridge with separate logic and motor supplies.
+  - id: 13_ws2812_level_shifted_led_strip_good
+    name: WS2812 Level-Shifted Strip
+    path: test_circuits/good/13_ws2812_level_shifted_led_strip/circuit.cnet
+    source_kind: regression
+    topology_family: level-shifted LED strip
+    purpose: Raspberry Pi Pico drives a 5 V WS2812-style strip through a level shifter with series data resistor and bulk capacitor.

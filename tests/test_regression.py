@@ -13,8 +13,22 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def test_regression_manifest_loads() -> None:
     manifest = yaml.safe_load((ROOT / "test_circuits" / "manifest.yaml").read_text(encoding="utf-8"))
-    assert len(manifest["cases"]) == 22
-    assert {case["family"] for case in manifest["cases"]} >= {"01_led_resistor", "02_mosfet_switch", "03_voltage_divider_adc", "04_repeated_groups", "05_relay_flyback"}
+    assert len(manifest["cases"]) == 30
+    assert {case["family"] for case in manifest["cases"]} >= {
+        "01_led_resistor",
+        "02_mosfet_switch",
+        "03_voltage_divider_adc",
+        "04_repeated_groups",
+        "05_relay_flyback",
+        "06_arduino_mosfet_pwm",
+        "07_esp32_i2c_sensor",
+        "08_pico_spi_adc",
+        "09_lm358_signal_conditioning",
+        "10_lm393_comparator_hysteresis",
+        "11_uln2003_relay_driver",
+        "12_l293d_motor_driver",
+        "13_ws2812_level_shifted_led_strip",
+    }
 
 
 def test_expected_results_schema_vertical_slice() -> None:

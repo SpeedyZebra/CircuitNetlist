@@ -1,0 +1,21 @@
+{
+  "components": {
+    "V1": {"x": 80, "y": 150, "rotation": 0, "locked": false},
+    "U2": {"x": 620, "y": 210, "rotation": 0, "locked": false},
+    "U1": {"x": 1080, "y": 170, "rotation": 0, "locked": false},
+    "R_REF_TOP": {"x": 330, "y": 100, "rotation": 90, "locked": false},
+    "R_REF_BOT": {"x": 330, "y": 470, "rotation": 90, "locked": false},
+    "R_SENS_TOP": {"x": 460, "y": 100, "rotation": 90, "locked": false},
+    "R_SENS_BOT": {"x": 460, "y": 470, "rotation": 90, "locked": false},
+    "R_HYST": {"x": 850, "y": 80, "rotation": 90, "locked": false},
+    "R_OUT_PULL": {"x": 980, "y": 80, "rotation": 90, "locked": false},
+    "C_DEC": {"x": 620, "y": 560, "rotation": 90, "locked": false}
+  },
+  "nets": {
+    "REF": {"render_style": "net_label"},
+    "SENSE": {"render_style": "net_label"},
+    "COMP_OUT": {"render_style": "net_label"}
+  },
+  "wire_waypoints": {},
+  "canvas": {"grid": 40, "width": 1500, "height": 900}
+}

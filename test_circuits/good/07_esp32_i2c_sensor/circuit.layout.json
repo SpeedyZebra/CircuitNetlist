@@ -1,0 +1,19 @@
+{
+  "components": {
+    "V1": {"x": 80, "y": 180, "rotation": 0, "locked": false},
+    "UREG1": {"x": 300, "y": 170, "rotation": 0, "locked": false},
+    "U1": {"x": 600, "y": 120, "rotation": 0, "locked": false},
+    "SENS1": {"x": 1280, "y": 220, "rotation": 0, "locked": false},
+    "R_SDA": {"x": 1020, "y": 20, "rotation": 90, "locked": false},
+    "R_SCL": {"x": 1160, "y": 20, "rotation": 90, "locked": false},
+    "R_EN": {"x": 500, "y": 20, "rotation": 90, "locked": false},
+    "C_REG": {"x": 320, "y": 430, "rotation": 90, "locked": false},
+    "C_ESP": {"x": 680, "y": 620, "rotation": 90, "locked": false}
+  },
+  "nets": {
+    "I2C_SDA": {"render_style": "net_label"},
+    "I2C_SCL": {"render_style": "net_label"}
+  },
+  "wire_waypoints": {},
+  "canvas": {"grid": 40, "width": 1700, "height": 950}
+}

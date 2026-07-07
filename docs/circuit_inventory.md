@@ -1,8 +1,8 @@
 # Circuit Inventory
 
-QA-1 inventory date: 2026-07-03. QA-3 clarifies that "all circuits" means all physical fixture `.cnet` files; embedded unit-test snippets are tracked separately below. ERC-1 adds shared open/short fault fixtures.
+QA-1 inventory date: 2026-07-03. QA-3 clarifies that "all circuits" means all physical fixture `.cnet` files; embedded unit-test snippets are tracked separately below. ERC-1 adds shared open/short fault fixtures. EX-1 expands the clean inventory with additional MCU, module, and IC examples.
 
-All physical `.cnet` files are classified in `test_circuits/clean_circuits.yaml` or `test_circuits/negative_circuits.yaml`. Clean circuits are expected to produce zero diagnostics across parse, validation, ERC, placement, routing, scene, shared visual DRC, SVG export, and PNG export. Negative circuits are fault fixtures and must produce exactly the listed diagnostic codes.
+All physical `.cnet` files are classified in `test_circuits/clean_circuits.yaml` or `test_circuits/negative_circuits.yaml`. Clean circuits are expected to produce zero diagnostics across parse, validation, ERC, placement, routing, scene, shared visual DRC, rendered connectivity, SVG export, and PNG export. Negative circuits are fault fixtures and must produce exactly the listed diagnostic codes.
 
 ## Physical Circuit Files
 
@@ -21,6 +21,14 @@ All physical `.cnet` files are classified in `test_circuits/clean_circuits.yaml`
 | Multiple Decoupling Capacitors | `test_circuits/good/04_repeated_groups/multi_decoupling.cnet` | clean | Local and bulk rail capacitors | decoupling | none | pass | yes | yes | yes |
 | Decoupling Plus RC Filters | `test_circuits/good/04_repeated_groups/multi_decoupling_with_rc_filters.cnet` | clean | Mixed decoupling bank and RC filters | decoupling + RC | none | pass | yes | yes | yes |
 | Relay Flyback Driver | `test_circuits/good/05_relay_flyback/circuit.cnet` | clean | Low-side relay-coil driver with flyback diode | motor or relay with flyback | none | pass | yes | yes | yes |
+| Arduino MOSFET PWM Driver | `test_circuits/good/06_arduino_mosfet_pwm/circuit.cnet` | clean | Arduino Nano PWM output drives a low-side MOSFET inductive load | MCU MOSFET PWM driver | none | pass | yes | yes | yes |
+| ESP32 I2C Sensor | `test_circuits/good/07_esp32_i2c_sensor/circuit.cnet` | clean | ESP32 DevKit reads a 3.3 V I2C sensor module with pullups | MCU I2C sensor | none | pass | yes | yes | yes |
+| Pico SPI ADC | `test_circuits/good/08_pico_spi_adc/circuit.cnet` | clean | Raspberry Pi Pico connects to an MCP3008-style SPI ADC | MCU SPI ADC | none | pass | yes | yes | yes |
+| LM358 Signal Conditioning | `test_circuits/good/09_lm358_signal_conditioning/circuit.cnet` | clean | Single-supply op amp filters and amplifies a sensor signal into an MCU ADC | op-amp signal conditioning | none | pass | yes | yes | yes |
+| LM393 Comparator | `test_circuits/good/10_lm393_comparator_hysteresis/circuit.cnet` | clean | Comparator threshold detector with output pullup and hysteresis feedback | comparator hysteresis | none | pass | yes | yes | yes |
+| ULN2003 Relay Driver | `test_circuits/good/11_uln2003_relay_driver/circuit.cnet` | clean | MCU output drives a relay coil through a ULN2003-style driver array | driver array relay | none | pass | yes | yes | yes |
+| L293D Motor Driver | `test_circuits/good/12_l293d_motor_driver/circuit.cnet` | clean | H-bridge motor driver with separate logic and motor supplies | motor driver | none | pass | yes | yes | yes |
+| WS2812 Level-Shifted Strip | `test_circuits/good/13_ws2812_level_shifted_led_strip/circuit.cnet` | clean | RP2040 data output drives a 5 V WS2812-style strip through a level shifter | level-shifted LED strip | none | pass | yes | yes | yes |
 | Missing LED Resistor | `test_circuits/faults/01_led_resistor/missing_resistor.cnet` | negative | LED intentionally lacks a current-limiting resistor | LED resistor | `ERC_LED_NO_CURRENT_LIMIT` | pass | yes | yes | yes |
 | Reversed LED | `test_circuits/faults/01_led_resistor/reversed_led.cnet` | negative | LED polarity intentionally reversed | LED resistor | `ERC_LED_POLARITY_REVERSED` | pass | yes | yes | yes |
 | LED Terminals Shorted | `test_circuits/faults/01_led_resistor/led_terminals_shorted.cnet` | negative | LED anode and cathode intentionally tied together | LED resistor | `ERC_LED_TERMINALS_SHORTED` | pass | yes | yes | yes |

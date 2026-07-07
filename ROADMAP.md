@@ -359,3 +359,24 @@ Still intentionally limited to UI-1 scope:
 - No Playwright execution or browser-test expansion in this milestone.
 - No simulation engine.
 - No routing, placement, or component-library architecture changes.
+
+## Milestone EX-1 - expanded clean circuit examples with additional MCUs and ICs
+
+Status: complete
+
+Implemented in this branch:
+
+- Eight new zero-diagnostic clean circuits covering Arduino Nano, ESP32 DevKit, Raspberry Pi Pico, LM358, LM393, MCP3008, ULN2003, L293D, level shifting, and WS2812-style LED strips.
+- Module-level component definitions for Arduino Nano / ATmega328P, ESP32 DevKit, Raspberry Pi Pico / RP2040, BME280-style I2C sensors, DS18B20-style one-wire sensors, and WS2812-style LED strips.
+- Targeted IC/block definitions for LM358 dual op amp, LM393 comparator, MCP3008 SPI ADC, MCP23017 I2C GPIO expander, generic LDO regulator, ULN2003 driver array, L293D motor driver, and unidirectional level shifter.
+- Component metadata for the new families, including summaries, common-use text, verified/module status, pin descriptions, electrical types, pin intents, and required supply pins where useful.
+- Clean-manifest, legacy regression-manifest, expected-result, and UI load-circuit entries for every new example.
+- Audit loading of adjacent saved layout JSON so curated clean examples are validated through the same app-style layout inputs.
+- Regression tests for new manifests, component metadata, MCU supply pins, I2C pullups, comparator pullup/hysteresis, MOSFET pulldown/flyback, motor-driver supplies, WS2812 support passives, saved layouts, and friendly UI names.
+- Documentation in `docs/expanded_example_circuits.md`, plus inventory and quality-gate updates.
+
+Still intentionally limited to EX-1 scope:
+
+- No simulation engine, DC solver, SPICE export, firmware behavior, or timing analysis.
+- No Playwright execution or browser-test expansion.
+- No major router replacement, major placement rewrite, hierarchy work, or full component-library trust overhaul.

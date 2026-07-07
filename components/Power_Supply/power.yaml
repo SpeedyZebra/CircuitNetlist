@@ -125,3 +125,26 @@
       TS: {description: Battery temperature sense input.}
       STAT: {description: Open-drain charge status output.}
       CE: {description: Charger enable input.}
+- id: POWER_LDO_REGULATOR_BLOCK
+  name: LDO Regulator
+  category: Power_Supply
+  manufacturer: Generic
+  part_number: AMS1117-style abstraction
+  description: Generic three-pin linear regulator functional block.
+  body: {renderer: functional_block, width: 180, height: 170, pin_pitch: 32}
+  parameters: {voltage: {required: false, unit: V}, role: {required: false}}
+  pins:
+    - {number: "1", name: VIN, aliases: [IN], side: left, position: 2, electrical_type: power_in, intent: regulator_input}
+    - {number: "2", name: GND, aliases: [ADJ], side: bottom, position: 3, electrical_type: power_in, intent: supply_ground}
+    - {number: "3", name: VOUT, aliases: [OUT], side: right, position: 2, electrical_type: power_out, intent: regulator_output}
+  metadata:
+    verified_status: functional_block
+    functional_symbol: true
+    summary: Generic AMS1117/LDO-style regulator block with input, output, and ground pins.
+    function: Converts a higher input voltage to a regulated lower output voltage in schematic examples.
+    common_use: Deriving a 3.3 V logic rail from a 5 V source.
+    warnings: Dropout voltage, heat, and stability requirements are not modeled.
+    pins:
+      VIN: {description: Regulator input supply.}
+      GND: {description: Ground reference.}
+      VOUT: {description: Regulated output rail.}

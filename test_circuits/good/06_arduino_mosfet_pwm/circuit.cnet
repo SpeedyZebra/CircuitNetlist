@@ -1,0 +1,41 @@
+CIRCUIT Arduino_MOSFET_PWM_Driver
+
+COMPONENT V1 POWER_DC_SOURCE voltage=5V
+COMPONENT U1 MCU_ARDUINO_NANO_ATMEGA328P_MODULE role=controller
+COMPONENT R_GATE BASIC_RESISTOR value=100ohm role=gate_resistor
+COMPONENT R_PULL BASIC_RESISTOR value=100kohm role=pulldown
+COMPONENT Q1 BASIC_NMOS role=low_side_switch
+COMPONENT LOAD1 BASIC_INDUCTOR value=100mH role=load
+COMPONENT D1 BASIC_DIODE role=flyback
+COMPONENT C_DEC BASIC_CAPACITOR_CERAMIC value=100nF role=decoupling
+COMPONENT C_BULK BASIC_CAPACITOR_POLARIZED value=47uF role=bulk
+
+NET 5V:
+    V1.POS
+    U1.5V
+    LOAD1.1
+    D1.K
+    C_DEC.1
+    C_BULK.POS
+
+NET LOAD_SW:
+    LOAD1.2
+    D1.A
+    Q1.D
+
+NET PWM:
+    U1.D3_PWM
+    R_GATE.1
+
+NET GATE:
+    R_GATE.2
+    R_PULL.1
+    Q1.G
+
+NET GND:
+    V1.NEG
+    U1.GND
+    R_PULL.2
+    Q1.S
+    C_DEC.2
+    C_BULK.NEG

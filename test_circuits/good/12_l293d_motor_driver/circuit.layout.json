@@ -1,0 +1,18 @@
+{
+  "components": {
+    "VLOGIC": {"x": 80, "y": 130, "rotation": 0, "locked": false},
+    "VMOTOR": {"x": 80, "y": 540, "rotation": 0, "locked": false},
+    "U1": {"x": 440, "y": 180, "rotation": 0, "locked": false},
+    "U2": {"x": 900, "y": 220, "rotation": 0, "locked": false},
+    "MOTOR1": {"x": 1340, "y": 300, "rotation": 90, "locked": false},
+    "R_EN": {"x": 680, "y": 20, "rotation": 90, "locked": false},
+    "C_LOGIC": {"x": 420, "y": 580, "rotation": 90, "locked": false},
+    "C_BULK": {"x": 250, "y": 680, "rotation": 90, "locked": false}
+  },
+  "nets": {
+    "MOTOR_A": {"render_style": "net_label"},
+    "MOTOR_B": {"render_style": "net_label"}
+  },
+  "wire_waypoints": {},
+  "canvas": {"grid": 40, "width": 1720, "height": 980}
+}

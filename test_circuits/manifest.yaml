@@ -41,6 +41,46 @@ cases:
     family: 05_relay_flyback
     type: good
     path: good/05_relay_flyback/circuit.cnet
+  - id: 06_arduino_mosfet_pwm_good
+    name: Arduino MOSFET PWM Driver
+    family: 06_arduino_mosfet_pwm
+    type: good
+    path: good/06_arduino_mosfet_pwm/circuit.cnet
+  - id: 07_esp32_i2c_sensor_good
+    name: ESP32 I2C Sensor
+    family: 07_esp32_i2c_sensor
+    type: good
+    path: good/07_esp32_i2c_sensor/circuit.cnet
+  - id: 08_pico_spi_adc_good
+    name: Pico SPI ADC
+    family: 08_pico_spi_adc
+    type: good
+    path: good/08_pico_spi_adc/circuit.cnet
+  - id: 09_lm358_signal_conditioning_good
+    name: LM358 Signal Conditioning
+    family: 09_lm358_signal_conditioning
+    type: good
+    path: good/09_lm358_signal_conditioning/circuit.cnet
+  - id: 10_lm393_comparator_hysteresis_good
+    name: LM393 Comparator
+    family: 10_lm393_comparator_hysteresis
+    type: good
+    path: good/10_lm393_comparator_hysteresis/circuit.cnet
+  - id: 11_uln2003_relay_driver_good
+    name: ULN2003 Relay Driver
+    family: 11_uln2003_relay_driver
+    type: good
+    path: good/11_uln2003_relay_driver/circuit.cnet
+  - id: 12_l293d_motor_driver_good
+    name: L293D Motor Driver
+    family: 12_l293d_motor_driver
+    type: good
+    path: good/12_l293d_motor_driver/circuit.cnet
+  - id: 13_ws2812_level_shifted_led_strip_good
+    name: WS2812 Level-Shifted Strip
+    family: 13_ws2812_level_shifted_led_strip
+    type: good
+    path: good/13_ws2812_level_shifted_led_strip/circuit.cnet
   - id: 01_led_missing_resistor
     family: 01_led_resistor
     type: fault

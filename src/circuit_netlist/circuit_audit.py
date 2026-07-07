@@ -144,7 +144,7 @@ class CircuitAuditRunner:
             pipeline_allowed = not validation_blocked or (case.classification == "negative" and case.render_allowed)
             if pipeline_allowed:
                 _run_stage("topology", result, diagnostics, lambda: TopologyAnalyzer().analyze(circuit, self.library))
-                layout = self._place(circuit, result, diagnostics)
+                layout = self._place(circuit, result, diagnostics, source_path)
                 if layout is not None:
                     routes = self._route(circuit, layout, result, diagnostics)
                     scene = self._build_scene(circuit, layout, routes, result, diagnostics)
@@ -182,9 +182,9 @@ class CircuitAuditRunner:
         result.elapsed_ms = round((perf_counter() - started) * 1000, 3)
         return self._finalize(case, result, diagnostics, scene, routes)
 
-    def _place(self, circuit: Circuit, result: AuditResult, diagnostics: list[Diagnostic]) -> Layout | None:
+    def _place(self, circuit: Circuit, result: AuditResult, diagnostics: list[Diagnostic], source_path: Path) -> Layout | None:
         try:
-            layout = DeterministicPlacementEngine().place(circuit, self.library)
+            layout = DeterministicPlacementEngine().place(circuit, self.library, _layout_for_source(source_path, diagnostics))
             missing = sorted(component.ref for component in circuit.components if component.ref not in layout.components)
             if missing:
                 diagnostics.append(
@@ -319,6 +319,17 @@ def _run_rendered_connectivity_stage(circuit: Circuit, scene: SchematicScene, re
     except Exception as exc:
         diagnostics.append(_exception_diagnostic("RENDERED_CONNECTIVITY_EXCEPTION", "Rendered connectivity crashed", exc))
         result.stages["rendered_connectivity"] = "fail"
+
+
+def _layout_for_source(source_path: Path, diagnostics: list[Diagnostic]) -> Layout | None:
+    layout_path = source_path.with_suffix(".layout.json")
+    if not layout_path.exists():
+        return None
+    try:
+        return Layout.model_validate_json(layout_path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        diagnostics.append(_exception_diagnostic("PLACEMENT_LAYOUT_INVALID", f"Saved layout is invalid for {source_path}", exc))
+        return None
 
 
 def _placement_metadata_diagnostics(layout: Layout, diagnostics: list[Diagnostic]) -> None:

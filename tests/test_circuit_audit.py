@@ -24,9 +24,14 @@ pytestmark = [pytest.mark.audit, pytest.mark.slow]
 
 
 ROUTE_VALIDATED_CASES = {
+    "02_mosfet_switch_good",
+    "03_voltage_divider_adc_good",
     "04_multi_rc_filter",
     "04_multi_decoupling_with_rc_filters",
     "05_relay_flyback_good",
+    "07_esp32_i2c_sensor_good",
+    "10_lm393_comparator_hysteresis_good",
+    "12_l293d_motor_driver_good",
     "03_divider_missing_bottom",
     "erc_battery_polarity_reversed",
 }
@@ -57,6 +62,10 @@ def test_clean_manifest_contains_required_user_facing_families() -> None:
     assert "motor or relay with flyback" in families
     assert "solar LED / solar charger battery system" in families
     assert "repeated MOSFET channels" in families
+    assert "MCU MOSFET PWM driver" in families
+    assert "MCU I2C sensor" in families
+    assert "MCU SPI ADC" in families
+    assert "level-shifted LED strip" in families
 
 
 @pytest.mark.parametrize("case", CLEAN_CASES, ids=lambda case: case.id)
@@ -149,9 +158,9 @@ def test_audit_summary_reports_zero_unexpected_diagnostics(tmp_path: Path) -> No
     runner = CircuitAuditRunner(tmp_path / "audit")
     results = runner.run(load_audit_cases())
     summary = audit_summary(results)
-    assert summary["total_circuits"] == 37
-    assert summary["clean_circuits"] == 13
+    assert summary["total_circuits"] == 45
+    assert summary["clean_circuits"] == 21
     assert summary["negative_circuits"] == 24
-    assert summary["passed_clean_circuits"] == 13
+    assert summary["passed_clean_circuits"] == 21
     assert summary["passed_negative_circuits"] == 24
     assert summary["unexpected_diagnostics"] == 0

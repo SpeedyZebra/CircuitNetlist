@@ -459,7 +459,7 @@ def circuit_catalog() -> dict[str, Any]:
     expected = load_expected_results()
     for case in manifest.get("cases", []):
         path = TEST_CIRCUITS_ROOT / case["path"]
-        title = human_title(case["family"], case["path"])
+        title = case.get("name") or human_title(case["family"], case["path"])
         item = catalog_item(case["id"], title, path, f"regression_{case['type']}", "", case=case, expected=expected.get(case["path"], {}))
         regression["good" if case["type"] == "good" else "faults"].append(item)
     return {"examples": examples, "regression": regression}

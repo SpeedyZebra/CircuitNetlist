@@ -1,6 +1,6 @@
 # Circuit Quality Gate
 
-QA-1 added a project-wide circuit quality gate for every physical `.cnet` file in the repository. QA-2 extends that gate with stricter visible-geometry checks for label, stub, text, and symbol overlaps. QA-3 centralizes those checks in `src/circuit_netlist/visual_drc.py` so regression, audit, app rendering, and placement candidate validation use the same visual DRC implementation. ERC-1 centralizes topology-level open/short electrical checks in `src/circuit_netlist/erc.py`. EC-1 adds rendered connectivity validation in `src/circuit_netlist/rendered_connectivity.py` so the canonical scene must electrically match the netlist.
+QA-1 added a project-wide circuit quality gate for every physical `.cnet` file in the repository. QA-2 extends that gate with stricter visible-geometry checks for label, stub, text, and symbol overlaps. QA-3 centralizes those checks in `src/circuit_netlist/visual_drc.py` so regression, audit, app rendering, and placement candidate validation use the same visual DRC implementation. ERC-1 centralizes topology-level open/short electrical checks in `src/circuit_netlist/erc.py`. EC-1 adds rendered connectivity validation in `src/circuit_netlist/rendered_connectivity.py` so the canonical scene must electrically match the netlist. EX-1 expands the clean fixture set to 21 circuits while keeping the negative fixture set at 24 circuits.
 
 ## Clean Versus Negative
 
@@ -67,6 +67,8 @@ The audit runner executes:
 
 Clean circuits pass only when all diagnostics are empty. Negative circuits pass only when the actual diagnostic code multiset exactly matches the manifest.
 
+When a source file has an adjacent `circuit.layout.json` or example `.layout.json`, the audit runner loads it before placement. The saved layout is treated as an input to the same full pipeline, so routing, canonical scene construction, visual DRC, rendered connectivity, ERC, and export checks still decide whether the circuit is clean.
+
 ## Audit Command
 
 Run every manifest circuit:
@@ -125,8 +127,9 @@ Regression, audit, route-validated placement, and app/API rendering use the shar
 1. Add the `.cnet` file under `examples/` or `test_circuits/good/`.
 2. Add a `test_circuits/clean_circuits.yaml` entry with topology family and purpose.
 3. Add the circuit to `test_circuits/manifest.yaml` and `test_circuits/expected/expected_results.yaml` if it belongs in the legacy regression report.
-4. Run `python -m circuit_netlist.circuit_audit --case <id>`.
-5. Fix the circuit, component metadata, placement, routing, scene geometry, DRC, or ERC until diagnostics are zero.
+4. Add an adjacent saved layout only when the generated layout is visually cluttered or cannot satisfy the strict scene/DRC gate without manual placement help.
+5. Run `python -m circuit_netlist.circuit_audit --case <id>`.
+6. Fix the circuit, component metadata, placement, routing, scene geometry, DRC, or ERC until diagnostics are zero.
 
 ## Adding A Negative Circuit
 

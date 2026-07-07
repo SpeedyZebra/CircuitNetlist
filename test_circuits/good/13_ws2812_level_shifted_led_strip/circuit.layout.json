@@ -1,0 +1,22 @@
+{
+  "components": {
+    "V1": {"x": 80, "y": 180, "rotation": 0, "locked": false},
+    "UREG1": {"x": 320, "y": 170, "rotation": 0, "locked": false},
+    "U1": {"x": 620, "y": 180, "rotation": 0, "locked": false},
+    "U2": {"x": 1060, "y": 260, "rotation": 0, "locked": false},
+    "R_DATA": {"x": 1340, "y": 340, "rotation": 0, "locked": false},
+    "LEDS1": {"x": 1620, "y": 280, "rotation": 0, "locked": false},
+    "C_LOGIC": {"x": 640, "y": 660, "rotation": 90, "locked": false},
+    "C_BULK": {"x": 160, "y": 620, "rotation": 90, "locked": false}
+  },
+  "nets": {
+    "5V": {"render_style": "net_label"},
+    "3V3": {"render_style": "net_label"},
+    "GND": {"render_style": "net_label"},
+    "DATA_3V3": {"render_style": "net_label"},
+    "DATA_5V": {"render_style": "net_label"},
+    "LED_DIN": {"render_style": "net_label"}
+  },
+  "wire_waypoints": {},
+  "canvas": {"grid": 40, "width": 1980, "height": 980}
+}

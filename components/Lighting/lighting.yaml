@@ -51,3 +51,24 @@
       GND: {description: Ground reference.}
       DIN: {description: Serial data input.}
       DOUT: {description: Serial data output to the next LED.}
+- id: LIGHT_WS2812_STRIP
+  name: WS2812 LED Strip
+  category: Lighting
+  body: {renderer: functional_block, width: 200, height: 150, pin_pitch: 32}
+  parameters: {leds: {required: false}, role: {required: false}}
+  pins:
+    - {number: "1", name: 5V, aliases: [VDD, VCC], side: left, position: 1, electrical_type: power_in, intent: supply_positive}
+    - {number: "2", name: GND, aliases: [], side: left, position: 4, electrical_type: power_in, intent: supply_ground}
+    - {number: "3", name: DIN, aliases: [DATA_IN], side: right, position: 2, electrical_type: input, intent: digital_input}
+    - {number: "4", name: DOUT, aliases: [DATA_OUT], side: right, position: 4, electrical_type: output, intent: digital_output, required: false}
+  metadata:
+    verified_status: generic
+    summary: WS2812-style addressable LED strip input block with 5 V power, ground, and serial data input.
+    function: Represents a chain of addressable RGB LEDs driven by a one-wire timing data stream.
+    common_use: LED strip examples using a 5 V supply, bulk capacitor, and series data resistor.
+    warnings: Data timing, current draw, and individual LED behavior are not simulated.
+    pins:
+      5V: {description: 5 V LED strip power rail.}
+      GND: {description: LED strip ground reference.}
+      DIN: {description: Serial data input from a level shifter or MCU.}
+      DOUT: {description: Optional data output to another strip segment.}

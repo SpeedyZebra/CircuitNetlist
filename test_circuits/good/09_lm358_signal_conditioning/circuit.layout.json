@@ -1,0 +1,25 @@
+{
+  "components": {
+    "V1": {"x": 80, "y": 120, "rotation": 0, "locked": false},
+    "VSIG": {"x": 80, "y": 540, "rotation": 0, "locked": false},
+    "U2": {"x": 610, "y": 220, "rotation": 0, "locked": false},
+    "U1": {"x": 1200, "y": 180, "rotation": 0, "locked": false},
+    "R_IN": {"x": 360, "y": 360, "rotation": 0, "locked": false},
+    "C_IN": {"x": 470, "y": 520, "rotation": 90, "locked": false},
+    "R_FB": {"x": 860, "y": 40, "rotation": 90, "locked": false},
+    "R_GAIN": {"x": 880, "y": 620, "rotation": 90, "locked": false},
+    "R_OUT": {"x": 980, "y": 300, "rotation": 0, "locked": false},
+    "C_DEC": {"x": 520, "y": 700, "rotation": 90, "locked": false}
+  },
+  "nets": {
+    "5V": {"render_style": "net_label"},
+    "GND": {"render_style": "net_label"},
+    "SENSOR_RAW": {"render_style": "net_label"},
+    "FILTERED_IN": {"render_style": "net_label"},
+    "AMP_OUT": {"render_style": "net_label"},
+    "AMP_FB": {"render_style": "net_label"},
+    "MCU_ADC": {"render_style": "net_label"}
+  },
+  "wire_waypoints": {},
+  "canvas": {"grid": 40, "width": 1660, "height": 980}
+}

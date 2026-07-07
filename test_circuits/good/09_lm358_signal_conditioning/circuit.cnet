@@ -1,0 +1,50 @@
+CIRCUIT LM358_Signal_Conditioning
+
+COMPONENT V1 POWER_DC_SOURCE voltage=5V
+COMPONENT VSIG POWER_DC_SOURCE voltage=1V role=signal_source
+COMPONENT U1 MCU_ARDUINO_NANO_ATMEGA328P_MODULE role=controller
+COMPONENT U2 IC_LM358_DUAL_OP_AMP role=controller
+COMPONENT R_IN BASIC_RESISTOR value=10kohm role=input
+COMPONENT C_IN BASIC_CAPACITOR_CERAMIC value=10nF role=filter
+COMPONENT R_FB BASIC_RESISTOR value=100kohm role=feedback
+COMPONENT R_GAIN BASIC_RESISTOR value=100kohm role=feedback
+COMPONENT R_OUT BASIC_RESISTOR value=1kohm
+COMPONENT C_DEC BASIC_CAPACITOR_CERAMIC value=100nF role=decoupling
+
+NET 5V:
+    V1.POS
+    U1.5V
+    U2.VCC
+    C_DEC.1
+
+NET SENSOR_RAW:
+    VSIG.POS
+    R_IN.1
+
+NET FILTERED_IN:
+    R_IN.2
+    C_IN.1
+    U2.INA+
+
+NET AMP_OUT:
+    U2.OUTA
+    R_FB.1
+    R_OUT.1
+
+NET AMP_FB:
+    U2.INA-
+    R_FB.2
+    R_GAIN.1
+
+NET MCU_ADC:
+    R_OUT.2
+    U1.A0
+
+NET GND:
+    V1.NEG
+    VSIG.NEG
+    U1.GND
+    U2.GND
+    C_DEC.2
+    C_IN.2
+    R_GAIN.2

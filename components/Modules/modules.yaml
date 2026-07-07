@@ -1,0 +1,153 @@
+- id: MCU_ARDUINO_NANO_ATMEGA328P_MODULE
+  name: Arduino Nano
+  category: MCU
+  manufacturer: Arduino-compatible
+  part_number: ATmega328P Nano module
+  package: 30-pin module abstraction
+  description: Module-level Arduino Nano / ATmega328P schematic abstraction.
+  body: {renderer: functional_block, width: 230, height: 300, fill: "#f4f4f4", stroke: "#222222", pin_pitch: 32}
+  parameters: {role: {required: false}}
+  pins:
+    - {number: "1", name: VIN, aliases: [RAW], side: left, position: 1, electrical_type: power_in, intent: supply_positive, required: false}
+    - {number: "2", name: 5V, aliases: [VCC], side: left, position: 2, electrical_type: power_in, intent: supply_positive}
+    - {number: "3", name: GND, aliases: [GND1, GND2], side: left, position: 8, electrical_type: power_in, intent: supply_ground}
+    - {number: "4", name: D3_PWM, aliases: [D3, PWM3], side: right, position: 2, electrical_type: bidirectional, intent: digital_output}
+    - {number: "5", name: D5_PWM, aliases: [D5, PWM5], side: right, position: 3, electrical_type: bidirectional, intent: digital_output}
+    - {number: "6", name: A0, aliases: [ADC0], side: right, position: 5, electrical_type: input, intent: analog_input}
+    - {number: "7", name: A4_SDA, aliases: [A4, SDA], side: right, position: 7, electrical_type: bidirectional, intent: digital_input}
+    - {number: "8", name: A5_SCL, aliases: [A5, SCL], side: right, position: 8, electrical_type: bidirectional, intent: digital_output}
+  metadata:
+    verified_status: module_level_abstraction
+    module_level: true
+    summary: Arduino Nano style ATmega328P development module with a verified subset of commonly used power, PWM, ADC, and I2C pins.
+    function: Provides 5 V MCU GPIO, PWM load control, ADC inputs, and I2C pins for beginner embedded circuits.
+    common_use: Small MCU controller for LED, MOSFET, sensor, relay, and motor examples.
+    notes: Schematic abstraction, not a complete 30-pin mechanical footprint.
+    pins:
+      VIN: {description: Raw input supply to the module regulator when used.}
+      5V: {description: 5 V module logic supply in this abstraction.}
+      GND: {description: Ground reference.}
+      D3_PWM: {description: Digital I/O with PWM capability, useful for MOSFET gate drive.}
+      D5_PWM: {description: Digital I/O with PWM capability.}
+      A0: {description: ADC input on the ATmega328P module.}
+      A4_SDA: {description: I2C data pin on Arduino Nano.}
+      A5_SCL: {description: I2C clock pin on Arduino Nano.}
+- id: MCU_ESP32_DEVKIT_MODULE
+  name: ESP32 DevKit
+  category: MCU
+  manufacturer: Espressif-compatible
+  part_number: ESP32-WROOM DevKit abstraction
+  package: Dev board module abstraction
+  description: Module-level ESP32 development board schematic abstraction.
+  body: {renderer: functional_block, width: 240, height: 340, fill: "#f4f4f4", stroke: "#222222", pin_pitch: 32}
+  parameters: {role: {required: false}}
+  pins:
+    - {number: "1", name: 3V3, aliases: [VCC, VDD], side: left, position: 1, electrical_type: power_in, intent: supply_positive}
+    - {number: "2", name: GND, aliases: [GND1, GND2], side: left, position: 10, electrical_type: power_in, intent: supply_ground}
+    - {number: "3", name: EN, aliases: [RESET_EN], side: left, position: 3, electrical_type: input, intent: control_pin, required: false}
+    - {number: "4", name: GPIO21_SDA, aliases: [GPIO21, SDA], side: right, position: 3, electrical_type: bidirectional, intent: digital_input}
+    - {number: "5", name: GPIO22_SCL, aliases: [GPIO22, SCL], side: right, position: 4, electrical_type: bidirectional, intent: digital_output}
+    - {number: "6", name: GPIO23_MOSI, aliases: [GPIO23, MOSI], side: right, position: 6, electrical_type: bidirectional, intent: digital_output}
+    - {number: "7", name: GPIO19_MISO, aliases: [GPIO19, MISO], side: right, position: 7, electrical_type: bidirectional, intent: digital_input}
+    - {number: "8", name: GPIO18_SCLK, aliases: [GPIO18, SCLK], side: right, position: 8, electrical_type: bidirectional, intent: digital_output}
+    - {number: "9", name: GPIO5_CS, aliases: [GPIO5, CS], side: right, position: 9, electrical_type: bidirectional, intent: digital_output}
+  metadata:
+    verified_status: module_level_abstraction
+    module_level: true
+    summary: ESP32 DevKit / ESP32-WROOM development module abstraction with common 3.3 V power, I2C, and SPI pins.
+    function: Provides 3.3 V Wi-Fi/Bluetooth MCU control and common serial buses.
+    common_use: I2C sensor nodes, SPI peripheral control, and connected embedded projects.
+    warnings: ESP32 GPIO boot-strap restrictions are not fully modeled here.
+    notes: Schematic abstraction with a verified common subset, not a full board pinout.
+    pins:
+      3V3: {description: 3.3 V module supply.}
+      GND: {description: Ground reference.}
+      EN: {description: Enable/reset input; often pulled up on dev boards.}
+      GPIO21_SDA: {description: Common ESP32 I2C SDA pin.}
+      GPIO22_SCL: {description: Common ESP32 I2C SCL pin.}
+      GPIO23_MOSI: {description: Common SPI MOSI signal.}
+      GPIO19_MISO: {description: Common SPI MISO signal.}
+      GPIO18_SCLK: {description: Common SPI clock signal.}
+      GPIO5_CS: {description: Common SPI chip-select GPIO.}
+- id: MCU_RASPBERRY_PI_PICO_RP2040_MODULE
+  name: Raspberry Pi Pico
+  category: MCU
+  manufacturer: Raspberry Pi
+  part_number: RP2040 Pico module
+  package: 40-pin module abstraction
+  description: Module-level Raspberry Pi Pico / RP2040 schematic abstraction.
+  body: {renderer: functional_block, width: 240, height: 340, fill: "#f4f4f4", stroke: "#222222", pin_pitch: 32}
+  parameters: {role: {required: false}}
+  pins:
+    - {number: "1", name: 3V3, aliases: [3V3_OUT, VCC], side: left, position: 1, electrical_type: power_in, intent: supply_positive}
+    - {number: "2", name: GND, aliases: [GND1, GND2], side: left, position: 10, electrical_type: power_in, intent: supply_ground}
+    - {number: "3", name: GP2_SCK, aliases: [GP2, SCK, SCLK], side: right, position: 3, electrical_type: bidirectional, intent: digital_output}
+    - {number: "4", name: GP3_MOSI, aliases: [GP3, MOSI], side: right, position: 4, electrical_type: bidirectional, intent: digital_output}
+    - {number: "5", name: GP4_MISO, aliases: [GP4, MISO], side: right, position: 5, electrical_type: bidirectional, intent: digital_input}
+    - {number: "6", name: GP5_CS, aliases: [GP5, CS], side: right, position: 6, electrical_type: bidirectional, intent: digital_output}
+    - {number: "7", name: GP15, aliases: [GPIO15], side: right, position: 8, electrical_type: bidirectional, intent: digital_output}
+    - {number: "8", name: GP26_ADC0, aliases: [GP26, ADC0], side: right, position: 9, electrical_type: input, intent: analog_input}
+  metadata:
+    verified_status: module_level_abstraction
+    module_level: true
+    summary: Raspberry Pi Pico / RP2040 module abstraction with 3.3 V power, SPI pins, GPIO, and ADC input.
+    function: Provides a 3.3 V RP2040 MCU for SPI ADC, GPIO, and sensor-control examples.
+    common_use: MicroPython/C embedded projects, SPI peripherals, data acquisition, and LED control.
+    notes: Schematic abstraction using a verified subset of Pico pins, not a full board footprint.
+    pins:
+      3V3: {description: 3.3 V module supply in this schematic abstraction.}
+      GND: {description: Ground reference.}
+      GP2_SCK: {description: RP2040 GPIO used as SPI clock.}
+      GP3_MOSI: {description: RP2040 GPIO used as SPI controller data output.}
+      GP4_MISO: {description: RP2040 GPIO used as SPI controller data input.}
+      GP5_CS: {description: RP2040 GPIO used as SPI chip select.}
+      GP15: {description: General-purpose digital output.}
+      GP26_ADC0: {description: ADC-capable input pin.}
+- id: MODULE_I2C_SENSOR_BME280
+  name: I2C Sensor Module
+  category: Sensor
+  manufacturer: Generic
+  part_number: BME280-style module abstraction
+  package: 4-pin module abstraction
+  description: Generic BME280-style I2C environmental sensor module.
+  body: {renderer: functional_block, width: 190, height: 170, fill: "#f4f4f4", stroke: "#222222", pin_pitch: 32}
+  parameters: {role: {required: false}}
+  pins:
+    - {number: "1", name: VCC, aliases: [VIN, 3V3], side: left, position: 1, electrical_type: power_in, intent: supply_positive}
+    - {number: "2", name: GND, aliases: [], side: left, position: 4, electrical_type: power_in, intent: supply_ground}
+    - {number: "3", name: SDA, aliases: [], side: right, position: 2, electrical_type: bidirectional, intent: digital_input}
+    - {number: "4", name: SCL, aliases: [], side: right, position: 3, electrical_type: input, intent: digital_input}
+  metadata:
+    verified_status: module_level_abstraction
+    module_level: true
+    summary: Generic 3.3 V I2C sensor module with power, ground, SDA, and SCL pins.
+    function: Represents a BME280-style environmental sensor module on an I2C bus.
+    common_use: Temperature, humidity, pressure, or other low-speed sensor examples.
+    notes: Module-level abstraction; pullups may be external even when real breakout boards include them.
+    pins:
+      VCC: {description: Sensor module supply.}
+      GND: {description: Ground reference.}
+      SDA: {description: I2C bidirectional data line.}
+      SCL: {description: I2C clock input.}
+- id: SENSOR_DS18B20_ONEWIRE
+  name: DS18B20 Sensor
+  category: Sensor
+  manufacturer: Generic
+  part_number: DS18B20-style abstraction
+  package: 3-pin sensor abstraction
+  description: Generic one-wire temperature sensor abstraction.
+  body: {renderer: functional_block, width: 170, height: 140, fill: "#f4f4f4", stroke: "#222222", pin_pitch: 32}
+  parameters: {role: {required: false}}
+  pins:
+    - {number: "1", name: VDD, aliases: [VCC], side: left, position: 1, electrical_type: power_in, intent: supply_positive}
+    - {number: "2", name: GND, aliases: [], side: left, position: 3, electrical_type: power_in, intent: supply_ground}
+    - {number: "3", name: DQ, aliases: [DATA], side: right, position: 2, electrical_type: bidirectional, intent: digital_input}
+  metadata:
+    verified_status: generic
+    summary: One-wire temperature sensor abstraction with supply, ground, and bidirectional data pin.
+    function: Represents DS18B20-style digital temperature sensing.
+    common_use: Simple temperature measurement with one GPIO and a pull-up resistor.
+    pins:
+      VDD: {description: Sensor supply.}
+      GND: {description: Ground reference.}
+      DQ: {description: One-wire bidirectional data pin requiring a pull-up.}

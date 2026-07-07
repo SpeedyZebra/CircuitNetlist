@@ -1,0 +1,233 @@
+- id: IC_LM358_DUAL_OP_AMP
+  name: LM358 Dual Op Amp
+  category: IC
+  manufacturer: Generic
+  part_number: LM358-compatible
+  package: DIP/SOIC-8 functional pinout
+  description: Generic LM358-style dual operational amplifier.
+  body: {renderer: functional_block, width: 220, height: 250, fill: "#f4f4f4", stroke: "#222222", pin_pitch: 32}
+  parameters: {role: {required: false}}
+  pins:
+    - {number: "1", name: OUTA, aliases: [OUT1], side: right, position: 2, electrical_type: output, intent: op_amp_output}
+    - {number: "2", name: INA-, aliases: [IN1-, A-], side: left, position: 2, electrical_type: input, intent: op_amp_input}
+    - {number: "3", name: INA+, aliases: [IN1+, A+], side: left, position: 3, electrical_type: input, intent: op_amp_input}
+    - {number: "4", name: GND, aliases: [V-, VSS], side: bottom, position: 4, electrical_type: power_in, intent: op_amp_negative_supply}
+    - {number: "5", name: INB+, aliases: [IN2+, B+], side: left, position: 5, electrical_type: input, intent: op_amp_input, required: false}
+    - {number: "6", name: INB-, aliases: [IN2-, B-], side: left, position: 6, electrical_type: input, intent: op_amp_input, required: false}
+    - {number: "7", name: OUTB, aliases: [OUT2], side: right, position: 6, electrical_type: output, intent: op_amp_output, required: false}
+    - {number: "8", name: VCC, aliases: [V+, VDD], side: top, position: 4, electrical_type: power_in, intent: op_amp_positive_supply}
+  metadata:
+    verified_status: generic_verified_pinout
+    summary: LM358-style dual single-supply operational amplifier using the common 8-pin channel pinout.
+    function: Amplifies or buffers analog signals with external feedback networks.
+    common_use: Signal conditioning, buffering, low-speed sensor front ends, and simple active filters.
+    notes: Generic LM358-compatible schematic symbol; electrical limits are not simulated.
+    pins:
+      VCC: {description: Positive amplifier supply.}
+      GND: {description: Negative supply or ground for single-supply operation.}
+      INA-: {description: Channel A inverting input.}
+      INA+: {description: Channel A non-inverting input.}
+      OUTA: {description: Channel A output.}
+      INB+: {description: Channel B non-inverting input.}
+      INB-: {description: Channel B inverting input.}
+      OUTB: {description: Channel B output.}
+- id: IC_LM393_COMPARATOR
+  name: LM393 Comparator
+  category: IC
+  manufacturer: Generic
+  part_number: LM393-compatible
+  package: DIP/SOIC-8 functional pinout
+  description: Generic LM393-style dual open-collector comparator.
+  body: {renderer: functional_block, width: 220, height: 250, fill: "#f4f4f4", stroke: "#222222", pin_pitch: 32}
+  parameters: {role: {required: false}}
+  pins:
+    - {number: "1", name: OUTA, aliases: [OUT1], side: right, position: 2, electrical_type: open_drain, intent: open_drain_output}
+    - {number: "2", name: INA-, aliases: [IN1-, A-], side: left, position: 2, electrical_type: input, intent: analog_input}
+    - {number: "3", name: INA+, aliases: [IN1+, A+], side: left, position: 3, electrical_type: input, intent: analog_input}
+    - {number: "4", name: GND, aliases: [VSS], side: bottom, position: 4, electrical_type: power_in, intent: supply_ground}
+    - {number: "5", name: INB+, aliases: [IN2+, B+], side: left, position: 5, electrical_type: input, intent: analog_input, required: false}
+    - {number: "6", name: INB-, aliases: [IN2-, B-], side: left, position: 6, electrical_type: input, intent: analog_input, required: false}
+    - {number: "7", name: OUTB, aliases: [OUT2], side: right, position: 6, electrical_type: open_drain, intent: open_drain_output, required: false}
+    - {number: "8", name: VCC, aliases: [VDD], side: top, position: 4, electrical_type: power_in, intent: supply_positive}
+  metadata:
+    verified_status: generic_verified_pinout
+    summary: LM393-style dual comparator with open-collector outputs that need pull-up resistors.
+    function: Compares two analog input voltages and pulls the output low when the selected threshold condition is met.
+    common_use: Threshold detectors, sensor trip points, battery monitors, and digital wake inputs.
+    warnings: Comparator outputs are open-collector/open-drain and require an external pull-up.
+    pins:
+      VCC: {description: Positive comparator supply.}
+      GND: {description: Ground reference.}
+      INA-: {description: Channel A inverting input.}
+      INA+: {description: Channel A non-inverting input.}
+      OUTA: {description: Channel A open-collector output; add a pull-up.}
+      INB+: {description: Channel B non-inverting input.}
+      INB-: {description: Channel B inverting input.}
+      OUTB: {description: Channel B open-collector output; add a pull-up.}
+- id: IC_MCP3008_SPI_ADC
+  name: MCP3008 SPI ADC
+  category: IC
+  manufacturer: Microchip-compatible
+  part_number: MCP3008
+  package: DIP/SOIC-16 functional pinout
+  description: MCP3008-style 8-channel SPI ADC abstraction.
+  body: {renderer: functional_block, width: 250, height: 360, fill: "#f4f4f4", stroke: "#222222", pin_pitch: 32}
+  parameters: {role: {required: false}}
+  pins:
+    - {number: "1", name: CH0, aliases: [AIN0], side: left, position: 2, electrical_type: input, intent: analog_input}
+    - {number: "2", name: CH1, aliases: [AIN1], side: left, position: 3, electrical_type: input, intent: analog_input, required: false}
+    - {number: "3", name: CH2, aliases: [AIN2], side: left, position: 4, electrical_type: input, intent: analog_input, required: false}
+    - {number: "9", name: DGND, aliases: [GND], side: bottom, position: 6, electrical_type: power_in, intent: supply_ground}
+    - {number: "10", name: CS, aliases: [CS_SHDN], side: right, position: 3, electrical_type: input, intent: digital_input}
+    - {number: "11", name: DIN, aliases: [MOSI], side: right, position: 4, electrical_type: input, intent: digital_input}
+    - {number: "12", name: DOUT, aliases: [MISO], side: right, position: 5, electrical_type: output, intent: digital_output}
+    - {number: "13", name: CLK, aliases: [SCLK, SCK], side: right, position: 6, electrical_type: input, intent: digital_input}
+    - {number: "14", name: AGND, aliases: [], side: bottom, position: 3, electrical_type: power_in, intent: supply_ground}
+    - {number: "15", name: VREF, aliases: [REF], side: top, position: 3, electrical_type: power_in, intent: supply_positive}
+    - {number: "16", name: VDD, aliases: [VCC], side: top, position: 6, electrical_type: power_in, intent: supply_positive}
+  metadata:
+    verified_status: generic_verified_subset
+    summary: MCP3008-style 10-bit SPI analog-to-digital converter with power, reference, SPI, and first analog channels modeled.
+    function: Converts analog voltages on CH pins into digital data read over SPI.
+    common_use: Adds ADC inputs to MCUs such as Raspberry Pi Pico, Raspberry Pi, or other SPI controllers.
+    notes: CH3 through CH7 are intentionally omitted from this abstraction until needed.
+    pins:
+      VDD: {description: ADC digital supply.}
+      VREF: {description: Analog reference input, often tied to the ADC supply in simple circuits.}
+      AGND: {description: Analog ground reference.}
+      DGND: {description: Digital ground reference.}
+      CH0: {description: Analog input channel 0.}
+      CH1: {description: Analog input channel 1.}
+      CH2: {description: Analog input channel 2.}
+      CS: {description: SPI chip select, active low.}
+      DIN: {description: SPI data input from controller MOSI.}
+      DOUT: {description: SPI data output to controller MISO.}
+      CLK: {description: SPI clock input.}
+- id: IC_MCP23017_I2C_GPIO_EXPANDER
+  name: MCP23017 GPIO Expander
+  category: IC
+  manufacturer: Microchip-compatible
+  part_number: MCP23017
+  package: Functional I2C expander abstraction
+  description: MCP23017-style I2C GPIO expander abstraction.
+  body: {renderer: functional_block, width: 240, height: 300, fill: "#f4f4f4", stroke: "#222222", pin_pitch: 32}
+  parameters: {role: {required: false}}
+  pins:
+    - {number: "9", name: VDD, aliases: [VCC], side: top, position: 4, electrical_type: power_in, intent: supply_positive}
+    - {number: "10", name: GND, aliases: [VSS], side: bottom, position: 4, electrical_type: power_in, intent: supply_ground}
+    - {number: "12", name: SCL, aliases: [], side: left, position: 3, electrical_type: input, intent: digital_input}
+    - {number: "13", name: SDA, aliases: [], side: left, position: 4, electrical_type: bidirectional, intent: digital_input}
+    - {number: "15", name: A0, aliases: [ADDR0], side: left, position: 7, electrical_type: input, intent: digital_input, required: false}
+    - {number: "16", name: A1, aliases: [ADDR1], side: left, position: 8, electrical_type: input, intent: digital_input, required: false}
+    - {number: "17", name: A2, aliases: [ADDR2], side: left, position: 9, electrical_type: input, intent: digital_input, required: false}
+    - {number: "21", name: GPA0, aliases: [], side: right, position: 3, electrical_type: bidirectional, intent: digital_output, required: false}
+    - {number: "22", name: GPA1, aliases: [], side: right, position: 4, electrical_type: bidirectional, intent: digital_output, required: false}
+  metadata:
+    verified_status: generic_verified_subset
+    summary: MCP23017-style I2C GPIO expander abstraction with power, I2C bus, address, and two GPIO pins modeled.
+    function: Adds additional digital GPIO controlled over I2C.
+    common_use: Expanding MCU I/O for buttons, LEDs, relays, or simple control signals.
+    notes: Functional subset only; full 28-pin package is not modeled.
+    pins:
+      VDD: {description: Positive logic supply.}
+      GND: {description: Ground reference.}
+      SDA: {description: I2C bidirectional data pin.}
+      SCL: {description: I2C clock input.}
+      A0: {description: Address select input.}
+      A1: {description: Address select input.}
+      A2: {description: Address select input.}
+      GPA0: {description: General-purpose I/O pin A0.}
+      GPA1: {description: General-purpose I/O pin A1.}
+- id: IC_ULN2003_DRIVER_ARRAY
+  name: ULN2003 Driver Array
+  category: IC
+  manufacturer: Generic
+  part_number: ULN2003-compatible
+  package: Functional driver array abstraction
+  description: ULN2003-style Darlington low-side driver array abstraction.
+  body: {renderer: functional_block, width: 230, height: 300, fill: "#f4f4f4", stroke: "#222222", pin_pitch: 32}
+  parameters: {role: {required: false}}
+  pins:
+    - {number: "1", name: IN1, aliases: [], side: left, position: 2, electrical_type: input, intent: digital_input}
+    - {number: "2", name: IN2, aliases: [], side: left, position: 3, electrical_type: input, intent: digital_input, required: false}
+    - {number: "3", name: IN3, aliases: [], side: left, position: 4, electrical_type: input, intent: digital_input, required: false}
+    - {number: "8", name: GND, aliases: [], side: bottom, position: 4, electrical_type: power_in, intent: supply_ground}
+    - {number: "9", name: COM, aliases: [CLAMP], side: top, position: 4, electrical_type: passive, intent: supply_positive}
+    - {number: "16", name: OUT1, aliases: [], side: right, position: 2, electrical_type: open_drain, intent: open_drain_output}
+    - {number: "15", name: OUT2, aliases: [], side: right, position: 3, electrical_type: open_drain, intent: open_drain_output, required: false}
+    - {number: "14", name: OUT3, aliases: [], side: right, position: 4, electrical_type: open_drain, intent: open_drain_output, required: false}
+  metadata:
+    verified_status: generic_verified_subset
+    summary: ULN2003-style low-side driver array with input, open-collector output, common clamp, and ground pins.
+    function: Lets MCU GPIO switch relay coils, motors, lamps, or other higher-current loads.
+    common_use: Relay drivers and small unipolar motor/solenoid drivers.
+    notes: Functional subset only; additional channels are omitted until needed.
+    pins:
+      IN1: {description: Logic input for channel 1.}
+      IN2: {description: Logic input for channel 2.}
+      IN3: {description: Logic input for channel 3.}
+      OUT1: {description: Open-collector low-side output for channel 1.}
+      OUT2: {description: Open-collector low-side output for channel 2.}
+      OUT3: {description: Open-collector low-side output for channel 3.}
+      COM: {description: "Common flyback clamp node, usually tied to load supply for inductive loads."}
+      GND: {description: Driver ground reference.}
+- id: IC_L293D_MOTOR_DRIVER
+  name: L293D Motor Driver
+  category: IC
+  manufacturer: Generic
+  part_number: L293D-compatible
+  package: Functional H-bridge abstraction
+  description: L293D-style motor driver block for one DC motor channel.
+  body: {renderer: functional_block, width: 250, height: 320, fill: "#f4f4f4", stroke: "#222222", pin_pitch: 32}
+  parameters: {role: {required: false}}
+  pins:
+    - {number: "1", name: EN1, aliases: [ENABLE1, ENA], side: left, position: 2, electrical_type: input, intent: control_pin}
+    - {number: "2", name: IN1, aliases: [], side: left, position: 4, electrical_type: input, intent: digital_input}
+    - {number: "7", name: IN2, aliases: [], side: left, position: 5, electrical_type: input, intent: digital_input}
+    - {number: "3", name: OUT1, aliases: [], side: right, position: 4, electrical_type: output, intent: digital_output}
+    - {number: "6", name: OUT2, aliases: [], side: right, position: 5, electrical_type: output, intent: digital_output}
+    - {number: "8", name: VMOTOR, aliases: [VCC2, VS], side: top, position: 6, electrical_type: power_in, intent: supply_positive}
+    - {number: "16", name: VLOGIC, aliases: [VCC1, VDD], side: top, position: 3, electrical_type: power_in, intent: supply_positive}
+    - {number: "4", name: GND, aliases: [GND1, GND2], side: bottom, position: 4, electrical_type: power_in, intent: supply_ground}
+  metadata:
+    verified_status: generic_verified_subset
+    summary: L293D-style H-bridge motor driver abstraction with one enabled motor channel.
+    function: Drives a DC motor bidirectionally from MCU logic inputs and separate motor/logic supplies.
+    common_use: Beginner robot motor-drive examples.
+    notes: One channel is modeled; thermal limits and internal diode behavior are not simulated.
+    pins:
+      VLOGIC: {description: Logic supply for input circuitry.}
+      VMOTOR: {description: Motor/load supply.}
+      GND: {description: Common ground reference.}
+      EN1: {description: Channel enable input; drive or pull high for active channel.}
+      IN1: {description: Motor direction input 1.}
+      IN2: {description: Motor direction input 2.}
+      OUT1: {description: Motor output terminal 1.}
+      OUT2: {description: Motor output terminal 2.}
+- id: IC_UNIDIRECTIONAL_LEVEL_SHIFTER
+  name: Logic Level Shifter
+  category: IC
+  manufacturer: Generic
+  part_number: 3V3-to-5V buffer abstraction
+  package: Functional buffer abstraction
+  description: Unidirectional logic-level shifter / buffer abstraction.
+  body: {renderer: functional_block, width: 210, height: 210, fill: "#f4f4f4", stroke: "#222222", pin_pitch: 32}
+  parameters: {role: {required: false}}
+  pins:
+    - {number: "1", name: VCCA, aliases: [VL, VLOW], side: top, position: 2, electrical_type: power_in, intent: supply_positive}
+    - {number: "2", name: VCCB, aliases: [VH, VHIGH], side: top, position: 5, electrical_type: power_in, intent: supply_positive}
+    - {number: "3", name: GND, aliases: [], side: bottom, position: 4, electrical_type: power_in, intent: supply_ground}
+    - {number: "4", name: A_IN, aliases: [A, IN], side: left, position: 3, electrical_type: input, intent: digital_input}
+    - {number: "5", name: B_OUT, aliases: [B, OUT], side: right, position: 3, electrical_type: output, intent: digital_output}
+  metadata:
+    verified_status: generic
+    summary: Generic unidirectional level shifter or buffer used to translate a 3.3 V data signal to a 5 V logic domain.
+    function: Accepts a low-voltage logic input and drives a higher-voltage logic output when powered from both rails.
+    common_use: Driving WS2812 LED strips from 3.3 V MCU GPIO.
+    notes: Functional abstraction, not a specific IC pinout.
+    pins:
+      VCCA: {description: Low-side logic supply, commonly 3.3 V.}
+      VCCB: {description: High-side logic supply, commonly 5 V.}
+      GND: {description: Shared ground reference.}
+      A_IN: {description: Low-voltage logic input.}
+      B_OUT: {description: Shifted high-voltage logic output.}
