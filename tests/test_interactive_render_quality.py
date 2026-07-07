@@ -173,6 +173,14 @@ def test_default_solar_interactive_load_is_drc_clean() -> None:
     assert "DRC_STUB_LABEL_OVERLAP" not in response["expected"]["actual_codes"]
 
 
+def test_esp32_i2c_sensor_interactive_load_is_drc_and_connectivity_clean() -> None:
+    response = app_module.load_case(LoadCaseRequest(case_id="07_esp32_i2c_sensor_good"))
+    assert response["expected"]["match"] is True
+    assert response["layout_loaded"] is True
+    assert not [diag.get("code") for diag in response["drc"]]
+    assert not [diag.get("code") for diag in response["connectivity"]]
+
+
 def test_generated_layout_state_does_not_overwrite_user_layout() -> None:
     prepare_default_solar_without_layout()
     app_module.current_render_context()
